@@ -1,0 +1,37 @@
+---
+title: "ICCB Species distribution modelling and validation"
+author: "Scott Forrest and Charlotte Patterson"
+date: "`r Sys.Date()`"
+execute: 
+  cache: false
+# bibliography: references.bib
+toc: true
+number-sections: false
+format: 
+  html:
+    self-contained: true
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    code-line-numbers: true
+    code-overflow: scroll
+    fig-format: png
+    fig-dpi: 300
+  pdf:
+    geometry: 
+      - top=30mm
+      - left=30mm
+editor:
+  source
+abstract: |
+  In this script we are fitting species distribution models to the data of koalas (Phascolarctos cinereus) in the South-East Queensland (SEQ) region under current environmental conditions, which we will predict into future environmental conditions. 
+---
+
+## Import packages
+
+```{r}
+
+
+
+```
+
