@@ -1,0 +1,37 @@
+---
+title: "ICCB Environmental data download"
+author: "Scott Forrest and Charlotte Patterson"
+date: "`r Sys.Date()`"
+execute: 
+  cache: false
+# bibliography: references.bib
+toc: true
+number-sections: false
+format: 
+  html:
+    self-contained: true
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    code-line-numbers: true
+    code-overflow: scroll
+    fig-format: png
+    fig-dpi: 300
+  pdf:
+    geometry: 
+      - top=30mm
+      - left=30mm
+editor:
+  source
+abstract: |
+  In this script we are downloading current and future environmental data (as rasters) to use in species distribution models (SDMs) for koalas (Phascolarctos cinereus) in the South-East Queensland (SEQ) region. 
+---
+
+## Import packages
+
+```{r}
+
+
+
+```
+
