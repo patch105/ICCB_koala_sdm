@@ -31,7 +31,47 @@ abstract: |
 
 ```{r}
 
+library(terra)
+library(dplyr)
+library(sf)
+library(here)
+library(ggplot2)
 
+```
+## Load South East Queensland (SEQ) boundary
+
+https://qldspatial.information.qld.gov.au/catalogue/custom/detail.page?fid={3F3DBD69-647B-4833-B0A5-CC43D5E70699}
+
+```{r}
+
+LGA <- read_sf(here("Data/Environmental_variables/Local_Government_Areas.shp")) 
+
+LGA_SEQ <- read_sf(here("Data/Environmental_variables/Local_Government_Areas.shp")) %>% 
+  filter(lga %in% c("Brisbane City", "Moreton Bay City", "Logan City", "Ipswich City", "Redland City", "Scenic Rim Regional", "Somerset Regional", "Lockyer Valley Regional", "Gold Coast City", "Sunshine Coast Regional", "Toowoomba Regional", "Noosa Shire"))
+
+ggplot() +
+  geom_sf(data = LGA, color = "black") +
+  geom_sf(data = LGA_SEQ, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(title = "Local Government Areas Queensland (SEQ in purple)")
+  
+
+ggplot() +
+  geom_sf(data = LGA_SEQ, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(title = "Local Government Areas South East Queensland (SEQ)")
+
+
+# Merge the SEQ lgas into one polygon
+LGA_SEQ <- st_union(LGA_SEQ)
+
+ggplot() +
+  geom_sf(data = LGA_SEQ, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(title = "Local Government Areas South East Queensland Boundary")
 
 ```
 
