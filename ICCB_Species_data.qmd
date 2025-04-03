@@ -59,12 +59,18 @@ citation(package = "galah")
 ```{r}
 
 # Load the study area shapefile
-SEQ_extent <- st_read("Data/Environmental_variables/Local_Government_Areas.shp")
+Queensland_LGAs <- st_read("Data/Environmental_variables/Local_Government_Areas.shp")
+
+# Check the coordinate reference system (CRS)
+st_crs(Queensland_LGAs)
+
+# Covnert to WGS84
+Queensland_LGAs <- Queensland_LGAs %>% st_transform(4326)
 
 # Create a map using ggplot2
-map <- ggplot(data = SEQ_extent) +
+map <- ggplot(data = Queensland_LGAs) +
   geom_sf(fill = "orange", color = "black") +    # Plot polygons with border
-  ggtitle("South-East Queensland Spatial Extent") +             # Add title
+  ggtitle("Queensland Spatial Extent") +             # Add title
   theme_minimal()                                # Use a clean theme
 
 # Display the map
@@ -74,7 +80,7 @@ print(map)
 
 ```{r}
 
-SEQ_extent <- SEQ_extent %>% dplyr::filter(
+SEQ_extent <- Queensland_LGAs %>% dplyr::filter(
   abbrev_nam %in% c("BRISBANE", 
                     "GOLD COAST", 
                     "IPSWICH", 
@@ -93,10 +99,25 @@ SEQ_extent <- SEQ_extent %>% dplyr::filter(
 map <- ggplot(data = SEQ_extent) +
   geom_sf(fill = "orange", color = "black") +    # Plot polygons with border
   ggtitle("South-East Queensland Spatial Extent") +             # Add title
-  theme_minimal()                                # Use a clean theme
+  theme_bw()                               
 
 # Display the map
 print(map)
+
+```
+
+## Merge into a single polygon
+
+```{r}
+
+# Merge the SEQ LGAs into one polygon
+SEQ_extent <- st_union(SEQ_extent)
+
+ggplot() +
+  geom_sf(data = SEQ_extent, fill = "orange", 
+          color = "black", size = 0.2) +
+  ggtitle("South-East Queensland Spatial Extent") + 
+  theme_bw() 
 
 ```
 
@@ -106,14 +127,14 @@ To access records from the ALA, you will need to be registered.
 
 There are two registration options:
 
-1.  If you are affiliated with an Australian institution, you might be able to register for ALA through your institution. Find your institution in the list of institutions when you select 'Login' [on the ALA website](https://www.ala.org.au/). Follow the prompts to enter your institution email and password. If your institution is not listed, you will need to register for an ALA account.
+1.  If you are affiliated with an Australian institution, you should be able to register for ALA through your institution. Find your institution in the list of institutions when you select 'Login' [on the ALA website](https://www.ala.org.au/). Follow the prompts to enter your institution email and password. If your institution is not listed, you will need to register for an ALA account.
 
 2. If you are not affiliated with an Australian institution, you will need to register for an ALA account. You can do this by selecting 'Register' [on the ALA website](https://www.ala.org.au/). Follow the prompts to enter your email and password.
 
 ```{r}
 
 galah_config(atlas = "ALA",
-             username = "scott.forrest@hdr.qut.edu.au",
+             # username = "scott.forrest@hdr.qut.edu.au",
              email = "scott.forrest@hdr.qut.edu.au"
              # password = "Password"
              )
@@ -124,32 +145,62 @@ galah_config(atlas = "ALA",
 
 ```{r}
 
-koala_occurrences <- galah_call() |>
-  galah_identify("Phascolarctos cinereus") |>
+koala_occurrences <- galah_call() %>% 
+  galah_identify("Phascolarctos cinereus") %>% 
   galah_filter(
     stateProvince == "Queensland",
     occurrenceStatus == "PRESENT"
-  ) |>
-  # galah_select(institutionID, group = "basic") |>
+  ) %>% 
   atlas_occurrences()
 
 ```
-
+## Clean koala data
 
 ```{r}
 
 # Create a map using ggplot2
-map <- ggplot(data = bris) +
-  geom_sf(fill = "orange", color = "black") +    # Plot polygons with border
+ggplot() +
+  geom_sf(data = Queensland_LGAs,
+          fill = "orange", color = "black") +    # Plot polygons with border
   geom_point(data = koala_occurrences,
              aes(x = decimalLongitude,
                  y = decimalLatitude),
              color = "blue", size = 0.5) + # Add points for occurrences
-  ggtitle("South-East Queensland Spatial Extent") +             # Add title
-  theme_minimal()                                # Use a clean theme
+  ggtitle("Queensland Spatial Extent") +             # Add title
+  theme_bw()
 
-# Display the map
-print(map)
+```
+
+## Filter by SEQ region
+
+```{r}
+
+# Check for missing values in decimalLongitude and decimalLatitude
+paste0("Number of NAs in 'longitude' ", sum(is.na(koala_occurrences$decimalLongitude)))
+paste0("Number of NAs in 'latitude' ", sum(is.na(koala_occurrences$decimalLatitude)))
+
+koala_occ_sf <- koala_occurrences %>% 
+  drop_na(decimalLongitude, decimalLatitude) %>% # remove NA values
+  st_as_sf(coords = c("decimalLongitude", "decimalLatitude"), 
+           crs = 4326) %>%
+  st_intersection(SEQ_extent) %>%
+  distinct()                    # drop any duplicated records
+
+```
+
+## Plot the filtered data
+
+```{r}
+
+# Create a map using ggplot2
+ggplot() +
+  geom_sf(data = SEQ_extent,
+            fill = "orange", color = "black") +          # Plot polygons with border
+  geom_sf(data = koala_occ_sf,                           # Add koala presence locations
+          aes(geometry = geometry),
+             color = "blue", size = 0.5) +               # Add points for occurrences
+  ggtitle("South-East Queensland Spatial Extent") +      # Add title
+  theme_bw()
 
 ```
 
