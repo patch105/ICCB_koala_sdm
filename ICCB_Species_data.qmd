@@ -42,6 +42,7 @@ abstract: |
 library(tidyverse)
 library(galah)
 library(sf)
+library(predicts)
 
 ```
 
@@ -201,6 +202,24 @@ ggplot() +
              color = "blue", size = 0.5) +               # Add points for occurrences
   ggtitle("South-East Queensland Spatial Extent") +      # Add title
   theme_bw()
+
+```
+
+# Sample pseudo-absence points
+
+```{r}
+
+# Set the location and number of background points
+# Random sampling at first
+background <- predicts::backgroundSample(mask = ice_free, 
+                                         n = nrow(koala_occ_sf))
+
+# Convert to terra SpatVector object
+background <- terra::vect(background, crs = 4326)
+
+# Convert background points (SpatVector) to data frame
+background_df <- as.data.frame(geom(background))
+
 
 ```
 
