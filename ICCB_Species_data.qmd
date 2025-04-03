@@ -39,7 +39,9 @@ abstract: |
 
 ```{r}
 
+library(tidyverse)
 library(galah)
+library(sf)
 
 ```
 
@@ -49,6 +51,52 @@ library(galah)
 
 # Package citation
 citation(package = "galah")
+
+```
+
+## Import spatial extent
+
+```{r}
+
+# Load the study area shapefile
+SEQ_extent <- st_read("Data/Environmental_variables/Local_Government_Areas.shp")
+
+# Create a map using ggplot2
+map <- ggplot(data = SEQ_extent) +
+  geom_sf(fill = "orange", color = "black") +    # Plot polygons with border
+  ggtitle("South-East Queensland Spatial Extent") +             # Add title
+  theme_minimal()                                # Use a clean theme
+
+# Display the map
+print(map)
+
+```
+
+```{r}
+
+SEQ_extent <- SEQ_extent %>% dplyr::filter(
+  abbrev_nam %in% c("BRISBANE", 
+                    "GOLD COAST", 
+                    "IPSWICH", 
+                    "LOCKYER VALLEY", 
+                    "LOGAN", 
+                    "MORETON BAY", 
+                    "NOOSA", 
+                    "REDLAND", 
+                    "SCENIC RIM", 
+                    "SOMERSET", 
+                    "SUNSHINE COAST", 
+                    "TOOWOOMBA")
+) 
+
+# Create a map using ggplot2
+map <- ggplot(data = SEQ_extent) +
+  geom_sf(fill = "orange", color = "black") +    # Plot polygons with border
+  ggtitle("South-East Queensland Spatial Extent") +             # Add title
+  theme_minimal()                                # Use a clean theme
+
+# Display the map
+print(map)
 
 ```
 
@@ -70,38 +118,9 @@ galah_config(atlas = "ALA",
              # password = "Password"
              )
 
-# search_all(fields, "australian states")
-
 ```
 
-## Import spatial extent
-
-```{r}
-
-# Load the study area shapefile
-seq_extent <- st_read("mountain_ash_centralhighlands/central_highlands.shp")
-
-# Create a map using ggplot2
-map <- ggplot(data = seq_extent) +
-  geom_sf(fill = "orange", color = "black") +    # Plot polygons with border
-  ggtitle("South-East Queensland Spatial Extent") +             # Add title
-  theme_minimal()                                # Use a clean theme
-
-# Display the map
-print(map)
-
-```
-
-
-```{r}
-
-galah_config(atlas = "ALA",
-             verbose = FALSE)
-galah_call() |>
-  count() |>
-  collect()
-
-```
+## Download koala data from ALA
 
 ```{r}
 
@@ -109,13 +128,28 @@ koala_occurrences <- galah_call() |>
   galah_identify("Phascolarctos cinereus") |>
   galah_filter(
     stateProvince == "Queensland",
-    # year >= 2010,
-    # profile = "ALA"
+    occurrenceStatus == "PRESENT"
   ) |>
-  galah_select(institutionID, group = "basic") |>
+  # galah_select(institutionID, group = "basic") |>
   atlas_occurrences()
 
 ```
 
 
+```{r}
+
+# Create a map using ggplot2
+map <- ggplot(data = bris) +
+  geom_sf(fill = "orange", color = "black") +    # Plot polygons with border
+  geom_point(data = koala_occurrences,
+             aes(x = decimalLongitude,
+                 y = decimalLatitude),
+             color = "blue", size = 0.5) + # Add points for occurrences
+  ggtitle("South-East Queensland Spatial Extent") +             # Add title
+  theme_minimal()                                # Use a clean theme
+
+# Display the map
+print(map)
+
+```
 
