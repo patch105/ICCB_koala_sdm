@@ -31,7 +31,7 @@ abstract: |
 
 ```{r}
 
-install.packages("galah")
+# install.packages("galah")
 
 ```
 
@@ -39,8 +39,16 @@ install.packages("galah")
 
 ```{r}
 
+library(galah)
 
+```
 
+## To cite the `galah` package
+
+```{r}
+
+# Package citation
+citation(package = "galah")
 
 ```
 
@@ -55,28 +63,44 @@ There are two registration options:
 2. If you are not affiliated with an Australian institution, you will need to register for an ALA account. You can do this by selecting 'Register' [on the ALA website](https://www.ala.org.au/). Follow the prompts to enter your email and password.
 
 ```{r}
-# Package citation
-citation(package = "galah")
-
-library(galah)
-
-# If you’re using occurrence data downloaded through galah in a publication, please generate a DOI and cite it. To request a DOI for a download of occurrence record, set mint_doi = TRUE in a call to atlas_occurrences(). To generate a citation for the downloaded occurrence records, pass the tibble generated to atlas_citation().
-
-# Download occurrence records with a DOI 
-occ <- atlas_occurrences(..., mint_doi = TRUE)
-
-# See DOI
-attr(occ, "doi")
-
-# Generate citation
-atlas_citation(occ)
-
 
 galah_config(atlas = "ALA",
-             username = "charlotte.patterson@hdr.qut.edu.au",
-             email = "charlotte.patterson@hdr.qut.edu.au",
-             password = "Password")
+             username = "scott.forrest@hdr.qut.edu.au",
+             email = "scott.forrest@hdr.qut.edu.au"
+             # password = "Password"
+             )
 
-search_all(fields, "australian states")
+# search_all(fields, "australian states")
+
 ```
+
+## Import spatial extent
+
+```{r}
+
+# Load the study area shapefile
+seq_extent <- st_read("mountain_ash_centralhighlands/central_highlands.shp")
+
+# Create a map using ggplot2
+map <- ggplot(data = seq_extent) +
+  geom_sf(fill = "orange", color = "black") +    # Plot polygons with border
+  ggtitle("South-East Queensland Spatial Extent") +             # Add title
+  theme_minimal()                                # Use a clean theme
+
+# Display the map
+print(map)
+
+```
+
+
+```{r}
+
+galah_config(atlas = "ALA",
+             verbose = FALSE)
+galah_call() |>
+  count() |>
+  collect()
+
+```
+
 
