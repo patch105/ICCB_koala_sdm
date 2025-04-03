@@ -26,7 +26,7 @@ This notebook, developed by the EcoCommons team, showcases how to download speci
 <blockquote>
 
 | Database | Acronym | R Package | Registration requirement |
-|:----------------|----------------:|:------------------:|:------------------:|
+|:---|---:|:--:|:--:|
 | the Global Biodiversity Information Facility | GBIF | rgbif | Yes |
 | the Atlas of Living Australia | ALA | galah | Yes |
 | eBird | \- | auk | Yes |
@@ -34,7 +34,7 @@ This notebook, developed by the EcoCommons team, showcases how to download speci
 <br> <!-- Adding this line for spacing -->
 
 | Database | Pros | Cons |
-|:---------------------|:----------------:|:------------------------------:|
+|:---|:--:|:--:|
 | the Global Biodiversity Information Facility | \- Global Coverage<br>- Open Access<br>- Standardized Data<br>- Broad Taxonomic Coverage<br>- Rich Metadata | \- Data Quality Concerns<br>- Limited Real-time Updates<br>- Less Targeted Search |
 | the Atlas of Living Australia | \- Australian Focus<br>- Integrated Tools<br>- Collaboration<br>- Detailed Metadata | \- Limited Geographic Coverage<br>- Less Diverse Taxonomy<br>- Data Quality Issues |
 | eBird | \- Citizen Science Contributions<br>- High Data Density<br>- Standardized Protocols<br>- Interactive Visualizations<br>- Mobile App Support | \- Bird-specific Data<br>- Data Quality Dependence on User Expertise<br>- Bias Toward Accessible Areas<br>- Restricted Data Access |
@@ -175,7 +175,7 @@ occ_search(taxonKey = taxonKey)
 There are three formats of species data that GBIF provides. Usually, "SIMPLE" version would be sufficient.
 
 |   | Raw data | Interpreted data | Multimedia | Coordinates | Format | Estimated data size |
-|-----------|-----------|-----------|-----------|-----------|-----------|-----------|
+|----|----|----|----|----|----|----|
 | **SIMPLE** | ✘ | ✔ | ✘ | ✔ (if available) | Tab-delimited CSV (for use in Excel, etc.) | **Very Large (TB)** (Hundreds of GB zipped for download) |
 | **DARWIN CORE ARCHIVE** | ✔ | ✔ | ✔ (links) | ✔ (if available) | Tab-delimited CSV (for use in Excel, etc.) | **Very Large (TB)** (Hundreds of GB zipped for download) |
 | **SPECIES LIST** | ✘ | ✔ | ✘ | ✘ | Tab-delimited CSV (for use in Excel, etc.) |  |
