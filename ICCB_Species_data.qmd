@@ -103,4 +103,19 @@ galah_call() |>
 
 ```
 
+```{r}
+
+koala_occurrences <- galah_call() |>
+  galah_identify("Phascolarctos cinereus") |>
+  galah_filter(
+    stateProvince == "Queensland",
+    # year >= 2010,
+    # profile = "ALA"
+  ) |>
+  galah_select(institutionID, group = "basic") |>
+  atlas_occurrences()
+
+```
+
+
 
