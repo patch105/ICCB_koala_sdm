@@ -55,7 +55,9 @@ citation(package = "galah")
 
 ```
 
-## Import spatial extent
+## Load South East Queensland (SEQ) boundary
+
+https://qldspatial.information.qld.gov.au/catalogue/custom/detail.page?fid={3F3DBD69-647B-4833-B0A5-CC43D5E70699}
 
 ```{r}
 
@@ -65,58 +67,50 @@ Queensland_LGAs <- st_read("Data/Environmental_variables/Local_Government_Areas.
 # Check the coordinate reference system (CRS)
 st_crs(Queensland_LGAs)
 
-# Covnert to WGS84
+# Convert to WGS84
 Queensland_LGAs <- Queensland_LGAs %>% st_transform(4326)
 
-# Create a map using ggplot2
-map <- ggplot(data = Queensland_LGAs) +
-  geom_sf(fill = "orange", color = "black") +    # Plot polygons with border
-  ggtitle("Queensland Spatial Extent") +             # Add title
-  theme_minimal()                                # Use a clean theme
+# Select local govt. areas for South East Queensland
+LGA_SEQ <- Queensland_LGAs %>% 
+  filter(lga %in% c("Brisbane City", 
+                    "Moreton Bay City", 
+                    "Logan City", 
+                    "Ipswich City", 
+                    "Redland City", 
+                    "Scenic Rim Regional", 
+                    "Somerset Regional", 
+                    "Lockyer Valley Regional", 
+                    "Gold Coast City", 
+                    "Sunshine Coast Regional", 
+                    "Toowoomba Regional", 
+                    "Noosa Shire"))
 
-# Display the map
-print(map)
+ggplot() +
+  geom_sf(data = LGA, color = "black") +
+  geom_sf(data = LGA_SEQ, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(title = "Local Government Areas Queensland (SEQ in purple)")
+  
 
-```
-
-```{r}
-
-SEQ_extent <- Queensland_LGAs %>% dplyr::filter(
-  abbrev_nam %in% c("BRISBANE", 
-                    "GOLD COAST", 
-                    "IPSWICH", 
-                    "LOCKYER VALLEY", 
-                    "LOGAN", 
-                    "MORETON BAY", 
-                    "NOOSA", 
-                    "REDLAND", 
-                    "SCENIC RIM", 
-                    "SOMERSET", 
-                    "SUNSHINE COAST", 
-                    "TOOWOOMBA")
-) 
-
-# Create a map using ggplot2
-map <- ggplot(data = SEQ_extent) +
-  geom_sf(fill = "orange", color = "black") +    # Plot polygons with border
-  ggtitle("South-East Queensland Spatial Extent") +             # Add title
-  theme_bw()                               
-
-# Display the map
-print(map)
+ggplot() +
+  geom_sf(data = LGA_SEQ, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(title = "Local Government Areas South East Queensland (SEQ)")
 
 ```
-
 ## Merge into a single polygon
 
 ```{r}
 
 # Merge the SEQ LGAs into one polygon
-SEQ_extent <- st_union(SEQ_extent)
+SEQ_extent <- st_union(LGA_SEQ)
 
 ggplot() +
-  geom_sf(data = SEQ_extent, fill = "orange", 
-          color = "black", size = 0.2) +
+  geom_sf(data = SEQ_extent, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  theme_minimal() +
+  theme(legend.position = "none") +
   ggtitle("South-East Queensland Spatial Extent") + 
   theme_bw() 
 
@@ -144,6 +138,8 @@ galah_config(atlas = "ALA",
 
 ## Download koala data from ALA
 
+Usually you would check that the CRS for the occurrences is the same as the shapefile. However, we know that the `galah' package operates in WGS84.
+
 ```{r}
 
 koala_occurrences <- galah_call() %>% 
@@ -161,13 +157,12 @@ koala_occurrences <- galah_call() %>%
 
 # Create a map using ggplot2
 ggplot() +
-  geom_sf(data = Queensland_LGAs,
-          fill = "orange", color = "black") +    # Plot polygons with border
+  geom_sf(data = LGA, color = "black") +
   geom_point(data = koala_occurrences,
              aes(x = decimalLongitude,
                  y = decimalLatitude),
              color = "blue", size = 0.5) + # Add points for occurrences
-  ggtitle("Queensland Spatial Extent") +             # Add title
+  ggtitle("Koala occurrences across Queensland") +             # Add title
   theme_bw()
 
 ```
@@ -195,17 +190,16 @@ koala_occ_sf <- koala_occurrences %>%
 
 # Create a map using ggplot2
 ggplot() +
-  geom_sf(data = SEQ_extent,
-            fill = "orange", color = "black") +          # Plot polygons with border
+  geom_sf(data = SEQ_extent, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
   geom_sf(data = koala_occ_sf,                           # Add koala presence locations
           aes(geometry = geometry),
              color = "blue", size = 0.5) +               # Add points for occurrences
-  ggtitle("South-East Queensland Spatial Extent") +      # Add title
+  ggtitle("Koala occurrences in South East Queensland") +      # Add title
   theme_bw()
 
 ```
 
-# Sample pseudo-absence points
+# Sample background points
 
 ```{r}
 
