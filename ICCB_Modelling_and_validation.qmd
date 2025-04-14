@@ -31,6 +31,93 @@ abstract: |
 
 ```{r}
 
+library(dplyr)
+library(purrr)
+library(ggplot2)
+library(terra)
+library(sf)
+
+```
+
+## Sampling bias
+
+```{r}
+
+ggplot() +
+  geom_sf(data = SEQ_extent, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  geom_sf(data = koala_occ_sf,                           # Add koala presence locations
+          aes(geometry = geometry),
+             color = "blue", size = 0.5) +               # Add points for occurrences
+  ggtitle("Koala occurrences in South East Queensland") +      # Add title
+  theme_bw()
+
+```
+
+# Human population density
+
+https://qldspatial.information.qld.gov.au/catalogue/custom/detail.page?fid={36DBF62A-76E4-4BFA-A04A-E747401C4C09}
+
+Some relevant details from the Metadata for this dataset: 
+
+POPULATION - The population (number of persons) indicated by the ABS Census figures that exist for this locality. This field will no longer be updated as of the 01/03/2016 due to changes in the source data from ABS data.
+
+```{r}
+
+pop.centre <- st_read("Data/Environmental_variables/Population_centres.shp")
+pop.centre <- st_transform(pop.centre, crs = st_crs(SEQ_extent)) # Transform to match SEQ_extent
+
+head(pop.centre)
+
+# Trim to South East Queensland
+pop.centre <- vect(pop.centre)
+
+pop.centre <- mask(pop.centre, SEQ_extent.vect) %>% 
+  filter(population != 0)
+
+ggplot() +
+  geom_sf(data = SEQ_extent, color = "black", size = 0.2) +
+  geom_sf(data = pop.centre, color = "purple3", aes(size = population), alpha = 0.5) +
+  theme_minimal() +
+  labs(title = "Population density in cities and towns in SEQ")
+
+```
+
+```{r}
+
+ggplot() +
+  geom_sf(data = SEQ_extent, color = "black", size = 0.2) +
+  geom_sf(data = koala_occ_sf,                           # Add koala presence locations
+          aes(geometry = geometry),
+             color = "blue", size = 0.5, alpha = 0.1) + 
+  geom_sf(data = pop.centre, color = "purple3", aes(size = population)) +
+  theme_minimal() +
+  labs(title = "Population density in cities and towns in SEQ")
+
+
+```
+
+
+# Calculate distance to main centres
+
+```{r}
+
+dist_centres <- terra::distance(ext.rast, pop.centre)
+dist_centres <- mask(dist_centres, ext.rast, maskvalue = NA)
+
+ggplot() +
+  geom_spatraster(data = dist_centres) +
+  scale_fill_viridis_c() +
+   theme_minimal() +
+  labs(title = "Distance to cities and towns SEQ")
+
+```
+
+
+
+```{r}
+
+library(sampbias)
+
 
 
 ```

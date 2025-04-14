@@ -39,10 +39,15 @@ abstract: |
 
 ```{r}
 
-library(tidyverse)
+library(dplyr)
+library(purrr)
+library(ggplot2)
 library(galah)
+library(terra)
 library(sf)
 library(predicts)
+library(tidyterra)
+
 
 ```
 
@@ -62,16 +67,16 @@ https://qldspatial.information.qld.gov.au/catalogue/custom/detail.page?fid={3F3D
 ```{r}
 
 # Load the study area shapefile
-Queensland_LGAs <- st_read("Data/Environmental_variables/Local_Government_Areas.shp")
+LGA <- st_read("Data/Environmental_variables/Local_Government_Areas.shp")
 
 # Check the coordinate reference system (CRS)
-st_crs(Queensland_LGAs)
+st_crs(LGA)
 
 # Convert to WGS84
-Queensland_LGAs <- Queensland_LGAs %>% st_transform(4326)
+LGA <- LGA %>% st_transform(4326)
 
 # Select local govt. areas for South East Queensland
-LGA_SEQ <- Queensland_LGAs %>% 
+LGA_SEQ <- LGA %>% 
   filter(lga %in% c("Brisbane City", 
                     "Moreton Bay City", 
                     "Logan City", 
@@ -182,6 +187,7 @@ koala_occ_sf <- koala_occurrences %>%
   st_intersection(SEQ_extent) %>%
   distinct()                    # drop any duplicated records
 
+
 ```
 
 ## Plot the filtered data
@@ -203,17 +209,71 @@ ggplot() +
 
 ```{r}
 
+# Convert our SEQ extent to a SpatExtent object by converting to a SpatVector
+SEQ_extent.vect <- terra::vect(SEQ_extent)
+ext <- terra::ext(SEQ_extent.vect)
+
+# Check and see that we have a SpatExtent
+str(ext)
+
+# Rasterise extent
+ext.rast <- terra::rast(ext, 
+                    nrows = 1000, 
+                    ncols = 1000, 
+                    crs = "EPSG:4326", 
+                    vals = 1) # Create a raster with the extent of SEQ
+
+# Mask extent by SEQ boundary
+ext.rast <- terra::mask(ext.rast, SEQ_extent.vect, updatevalue = NA)
+
+crs(ext.rast) <- "EPSG:4326"
+names(ext.rast) <- "SEQ_extent"
+
+plot(ext.rast)
+
 # Set the location and number of background points
 # Random sampling at first
-background <- predicts::backgroundSample(mask = ice_free, 
-                                         n = nrow(koala_occ_sf))
+# The mask means that any NA (not SEQ) locations do not include background points
+background <- predicts::backgroundSample(mask = ext.rast, 
+                                         n = 50000)
 
 # Convert to terra SpatVector object
-background <- terra::vect(background, crs = 4326)
+background <- terra::vect(background, crs = "EPSG:4326")
 
 # Convert background points (SpatVector) to data frame
 background_df <- as.data.frame(geom(background))
 
+koala_occ.vect <- vect(koala_occ_sf)
+
+# Plot the presences (blue) and the background points (grey)
+ggplot() +
+  geom_sf(data = SEQ_extent, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  geom_spatvector(data = background,                           # Add koala presence locations
+             color = "gray", cex = 0.5) +               # Add points for occurrences
+  geom_spatvector(data = koala_occ.vect, 
+                  aes(geometry = geometry), 
+                  color = "blue", cex = 0.5) + # Add background points
+  ggtitle("Koala occurrences (blue) and background points (grey) in South East Queensland") +      # Add title
+  theme_bw()
+
+
+```
+## Save koala presences and background points 
+This ensures quick upload in the future and that these records can be used among models. 
+
+```{r}
+
+writeVector(koala_occ.vect, "Data/Biological_records/SEQ_koala_occurrences.shp", overwrite = T)
+
+writeVector(background, "Data/Biological_records/background_points_50k_random.shp", overwrite = T)
+
+```
+
+## Save SEQ extent
+
+```{r}
+
+writeVector(SEQ_extent.vect, "Data/Environmental_variables/SEQ_extent.shp", overwrite = T)
 
 ```
 
