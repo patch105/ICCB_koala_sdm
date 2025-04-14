@@ -36,6 +36,8 @@ library(purrr)
 library(ggplot2)
 library(terra)
 library(sf)
+library(predicts)
+library(blockCV)
 
 ```
 
@@ -151,24 +153,46 @@ library(sampbias)
 
 ```
 
+## Load koala presences and background points
+
+They are loaded as spatvectors, but we also want them as dataframes for model input requirements.
+
 ```{r}
 
-bio.records <- bio.records %>% 
+koala_occ <- vect("Data/Biological_records/SEQ_koala_occurrences.shp")
+background <- vect("Data/Biological_records/background_points_50k_random.shp")
+
+# Make a dataframe of just x, y and presence
+koala_occ_df <- koala_occ %>% 
+  as.data.frame(geom = "XY") %>% 
   dplyr::select(x,y) %>% 
   mutate(Presence = 1)
 
-# Add presences and background --------------------------------------------
+head(koala_occ_df)
 
-background_df <- background_df[,c("x", "y")] %>% 
+background_df <- background %>% 
+  as.data.frame(geom = "XY") %>% 
+  dplyr::select(x,y) %>% 
   mutate(Presence = 0)
-  
-pr_bg <- rbind(bio.records, background_df)
+
+head(background_df)
+
+# Combine to one
+pr_bg <- rbind(koala_occ_df, background_df)
 
 ```
 
+## Load environmental covariates
+
 ```{r}
 
-# Extract enviro. covs for training ---------------------------------------
+
+
+```
+
+## Extract environmental covariate values from presence and background locations (training locations)
+
+```{r}
 
 train_PB_covs <- terra::extract(covs, pr_bg[,c("x", "y")], xy = T)
 train_PB_covs <- cbind(train_PB_covs, pr_bg["Presence"])
@@ -178,15 +202,13 @@ train_PB_covs <- cbind(train_PB_covs, pr_bg["Presence"])
 print(paste0("RECORDS FROM ", nrow(train_PB_covs) - sum(complete.cases(train_PB_covs)), " ROWS IN TRAINING DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
 
 train_PB_covs <- train_PB_covs[complete.cases(train_PB_covs), ] 
-# Reset the row IDs to adjust for removed rows
-rownames(train_PB_covs) <- NULL
 train_PB_covs <- dplyr::select(train_PB_covs, -ID)
 
 ```
 
-```{r}
+## Define environmental covariate values for prediction under *current* conditions
 
-# Extract enviro. covs for *current* prediction ------------------------------
+```{r}
 
 pred_cur_covs <- as.data.frame(covs, xy = T)
 
@@ -194,54 +216,75 @@ print(paste0("RECORDS FROM ", nrow(pred_cur_covs) - sum(complete.cases(pred_cur_
 
 # Remove rows with NA in any covariates
 pred_cur_covs <- pred_cur_covs[complete.cases(pred_cur_covs), ]
-# Reset the row IDs to adjust for removed rows
-rownames(pred_cur_covs) <- NULL
-
-
-# ggplot() +
-#   geom_spatraster(data = ice_free) + 
-#   scale_fill_viridis_c(na.value = NA) +  
-#   geom_point(data = bio.records, aes(x = x, y = y), color = "red", size = 0.5) +  
-#   geom_point(data = bio.recordssave, aes(x = x, y = y), color = "blue", size = 0.5) +  
-#   theme_minimal()
-
-
-# Extract enviro. covs for *future* prediction ------------------------------
-
-# pred_fut_covs <- as.data.frame(covs, xy = T)
-# 
-# print(paste0("RECORDS FROM ", nrow(pred_fut_covs) - sum(complete.cases(pred_fut_covs)), " ROWS IN PREDICTION DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
-# 
-# # Remove rows with NA in any covariates
-# pred_fut_covs <- pred_fut_covs[complete.cases(pred_fut_covs), ]
-# # Reset the row IDs to adjust for removed rows
-# rownames(pred_fut_covs) <- NULL
-# pred_fut_covs <- dplyr::select(pred_fut_covs, -ID)
-
+pred_cur_covs <- dplyr::select(pred_cur_covs, -ID)
 
 ```
+
 
 ## Maxent
 
 ```{r}
 
- # Make folder:
+# Make a folder to save outputs
   
-  dir.create("Outputs/Maxent_outputs", showWarnings = F)
+dir.create("Outputs/Maxent_outputs", showWarnings = F)
 
 
 ```
 
+
 ```{r}
 
- maxent.mod <- NULL
-  maxent.mod <- dismo::maxent(x = train_PB_covs_scv[, cov_names],
-                              p = train_PB_covs_scv[["Presence"]],
+maxent.mod <- NULL
+
+maxent.mod <- predicts::MaxEnt(x = train_PB_covs[, cov_names],
+                               p = train_PB_covs[["Presence"]],
+                               removeDuplicates = FALSE,
+                               path = "Outputs/Maxent_outputs",
+                               args = c("nothreshold"))
+
+maxent.mod <- dismo::maxent(x = train_PB_covs[, cov_names],
+                              p = train_PB_covs[["Presence"]],
                               removeDuplicates = FALSE,
-                              path = file.path(outpath, "Maxent_outputs"),
+                              path = "Outputs/Maxent_outputs",
                               args = c("nothreshold"))
   
-  # Testing set prediction
+  
+```
+
+
+
+## Model evaluation with spatial block cross-validation
+
+```{r}
+
+# Convert training data to sf
+train_PB_sf <- st_as_sf(train_PB_covs[, c("x", "y", "Presence")], coords = c("x", "y"), crs = "EPSG:3031")
+
+# Generate spatial blocks
+spblock <- cv_spatial(x = train_PB_sf, 
+                      column = "Presence",
+                      r = NULL,
+                      size = 1000, # Size of the blocks in metres
+                      k = 5,
+                      hexagon = TRUE,
+                      selection = "random",
+                      iteration = 100, # to find evenly-dispersed folds
+                      biomod2 = FALSE)
+
+cv_plot(cv = spblock,
+        x = train_PB_sf,
+        points_alpha = 0.5,
+        nrow = 2)
+
+
+```
+
+
+
+```{r}
+
+# Testing set prediction
   pred_test.mxt <- dismo::predict(maxent.mod, test_PB_covs_scv, args = "doclamp=false")
   pred_test.mxt <- cbind(test_PB_covs_scv, pred_test.mxt)
   colnames(pred_test.mxt)[grepl("pred", colnames(pred_test.mxt))] <- "pred"
@@ -295,7 +338,40 @@ rownames(pred_cur_covs) <- NULL
   # plet(pred.rast, "pred", tiles = "") %>% 
   #   points(background, col = "white", cex = 0.5, popup = T) %>% 
   #   points(bio.recordsVect, col = "red", cex = 0.5, popup = T)
-  
+
+```
+
+
+
+## Re-running Maxent with spatial block cross validation
+
+```{r}
+
+
+
+```
+
+
+
+
+## Define environmental covariate values for prediction under *future* conditions
+
+```{r}
+
+pred_fut_covs <- as.data.frame(covs, xy = T)
+
+print(paste0("RECORDS FROM ", nrow(pred_fut_covs) - sum(complete.cases(pred_fut_covs)), " ROWS IN PREDICTION DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
+
+# Remove rows with NA in any covariates
+pred_fut_covs <- pred_fut_covs[complete.cases(pred_fut_covs), ]
+pred_fut_covs <- dplyr::select(pred_fut_covs, -ID)
+
+```
+
+## Test the environmental distance between current data and future conditions
+
+```{r}
+
 ```
 
 
