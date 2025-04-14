@@ -113,12 +113,189 @@ ggplot() +
 ```
 
 
+For city accessibility you can get a publicly available version using the following code:
+
+```{r}
+
+url <- 'https://figshare.com/ndownloader/files/14189843'
+
+file <- 'Data/Environmental_variables/accessibility.tif'  # assuming you are in an R project folder that contains a “data” subfolder
+
+options(timeout = 1500) # increased max downloading time to 25 min
+
+download.file(url, file)
+
+accessibility_rast <- rast(file)
+
+NAflag(accessibility_rast) <- 65535 # reclass 65535 (water) as NA
+
+subsection <- ext(112, 155, -45, -10) # extent to crop to include Australia only [here you can use your own area]
+
+accessibility_rast <- crop(accessibility_rast, SEQ_extent)
+
+# transform it by using square root to get a better model fit
+
+accessibility_rast <- sqrt(accessibility_rast)
+
+```
+
+
+The human population density was taken from:
+https://www.abs.gov.au/AUSSTATS/abs@.nsf/DetailsPage/1270.0.55.0072011?OpenDocument
+
 
 ```{r}
 
 library(sampbias)
 
 
+```
+
+```{r}
+
+bio.records <- bio.records %>% 
+  dplyr::select(x,y) %>% 
+  mutate(Presence = 1)
+
+# Add presences and background --------------------------------------------
+
+background_df <- background_df[,c("x", "y")] %>% 
+  mutate(Presence = 0)
+  
+pr_bg <- rbind(bio.records, background_df)
 
 ```
+
+```{r}
+
+# Extract enviro. covs for training ---------------------------------------
+
+train_PB_covs <- terra::extract(covs, pr_bg[,c("x", "y")], xy = T)
+train_PB_covs <- cbind(train_PB_covs, pr_bg["Presence"])
+
+# Remove rows where there's values missing from at least one covariate
+
+print(paste0("RECORDS FROM ", nrow(train_PB_covs) - sum(complete.cases(train_PB_covs)), " ROWS IN TRAINING DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
+
+train_PB_covs <- train_PB_covs[complete.cases(train_PB_covs), ] 
+# Reset the row IDs to adjust for removed rows
+rownames(train_PB_covs) <- NULL
+train_PB_covs <- dplyr::select(train_PB_covs, -ID)
+
+```
+
+```{r}
+
+# Extract enviro. covs for *current* prediction ------------------------------
+
+pred_cur_covs <- as.data.frame(covs, xy = T)
+
+print(paste0("RECORDS FROM ", nrow(pred_cur_covs) - sum(complete.cases(pred_cur_covs)), " ROWS IN PREDICTION DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
+
+# Remove rows with NA in any covariates
+pred_cur_covs <- pred_cur_covs[complete.cases(pred_cur_covs), ]
+# Reset the row IDs to adjust for removed rows
+rownames(pred_cur_covs) <- NULL
+
+
+# ggplot() +
+#   geom_spatraster(data = ice_free) + 
+#   scale_fill_viridis_c(na.value = NA) +  
+#   geom_point(data = bio.records, aes(x = x, y = y), color = "red", size = 0.5) +  
+#   geom_point(data = bio.recordssave, aes(x = x, y = y), color = "blue", size = 0.5) +  
+#   theme_minimal()
+
+
+# Extract enviro. covs for *future* prediction ------------------------------
+
+# pred_fut_covs <- as.data.frame(covs, xy = T)
+# 
+# print(paste0("RECORDS FROM ", nrow(pred_fut_covs) - sum(complete.cases(pred_fut_covs)), " ROWS IN PREDICTION DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
+# 
+# # Remove rows with NA in any covariates
+# pred_fut_covs <- pred_fut_covs[complete.cases(pred_fut_covs), ]
+# # Reset the row IDs to adjust for removed rows
+# rownames(pred_fut_covs) <- NULL
+# pred_fut_covs <- dplyr::select(pred_fut_covs, -ID)
+
+
+```
+
+## Maxent
+
+```{r}
+
+ # Make folder:
+  
+  dir.create("Outputs/Maxent_outputs", showWarnings = F)
+
+
+```
+
+```{r}
+
+ maxent.mod <- NULL
+  maxent.mod <- dismo::maxent(x = train_PB_covs_scv[, cov_names],
+                              p = train_PB_covs_scv[["Presence"]],
+                              removeDuplicates = FALSE,
+                              path = file.path(outpath, "Maxent_outputs"),
+                              args = c("nothreshold"))
+  
+  # Testing set prediction
+  pred_test.mxt <- dismo::predict(maxent.mod, test_PB_covs_scv, args = "doclamp=false")
+  pred_test.mxt <- cbind(test_PB_covs_scv, pred_test.mxt)
+  colnames(pred_test.mxt)[grepl("pred", colnames(pred_test.mxt))] <- "pred"
+  
+  # Make an evaluation function
+  evaluate_prediction <- function(x){
+  
+  ROC = precrec::auc(precrec::evalmod(scores = x$pred, labels = x$Presence))[1,4]
+  PRG = prg::calc_auprg(prg::create_prg_curve(labels = x$Presence, pos_scores = x$pred))
+  boyce = ecospat::ecospat.boyce(fit = x$pred, 
+                                 obs = x$pred[which(x$Presence==1)], 
+                                 nclass = 0, # Calculate continuous index
+                                 method = "pearson",
+                                 PEplot = T)[["cor"]]
+  
+  partialROC = kuenm::kuenm_proc(occ.test = x$pred[which(x$Presence==1)],
+                                 model = x$pred,
+                                 threshold = 80,   # Omission threshold (e.g., 80%)
+                                 rand.percent = 50, # What percent of testing data for bootstrap
+                                 iterations = 500)$pROC_summary[[1]]
+  
+  eval_df <- data.frame(ROC = ROC,
+                        PRG = PRG,
+                        boyce = boyce,
+                        partialROC = partialROC) 
+
+ return(eval_df)
+  
+}
+
+  
+  # Evaluate prediction on test set
+  eval <- evaluate_prediction(pred_test.mxt)
+  
+  eval_df.mxt <- data.frame(group = group, 
+                            fold = f, 
+                            model = "MaxEnt", 
+                            eval)
+
+  # Current prediction
+  pred_cur.mxt <- dismo::predict(maxent.mod, pred_cur_covs, args = "doclamp=false")
+  pred_cur.mxt <- cbind(pred_cur_covs, pred_cur.mxt)
+  colnames(pred_cur.mxt)[grepl("pred", colnames(pred_cur.mxt))] <- "pred"
+  # pred_cur.rast <- rast(pred_cur[, c("x", "y", "pred")], type = "xyz", crs = "EPSG:3031")
+  
+  # Future prediction
+  # pred_fut.mxt <- dismo::predict(maxent.mod, pred_fut_covs, args = "doclamp=false")
+  
+  # plet(pred.rast, "pred", tiles = "")
+  # 
+  # plet(pred.rast, "pred", tiles = "") %>% 
+  #   points(background, col = "white", cex = 0.5, popup = T) %>% 
+  #   points(bio.recordsVect, col = "red", cex = 0.5, popup = T)
+  
+```
+
 
