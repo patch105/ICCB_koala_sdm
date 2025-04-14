@@ -62,9 +62,19 @@ citation(package = "galah")
 
 ## Load South East Queensland (SEQ) boundary
 
-https://qldspatial.information.qld.gov.au/catalogue/custom/detail.page?fid={3F3DBD69-647B-4833-B0A5-CC43D5E70699}
+We made this boundary in the 'ICCB_Environmental_data.qmd' script. 
+Also load local government area polygons (LGAs) just for plotting.
 
 ```{r}
+
+SEQ_extent.vect <- vect("Data/Environmental_variables/SEQ_extent.shp")
+
+# Define an sf object as well
+SEQ_extent <- st_as_sf(SEQ_extent.vect, 
+                        coords = c("x", "y"), 
+                        crs = 4326)
+                        
+
 
 # Load the study area shapefile
 LGA <- st_read("Data/Environmental_variables/Local_Government_Areas.shp")
@@ -90,36 +100,9 @@ LGA_SEQ <- LGA %>%
                     "Toowoomba Regional", 
                     "Noosa Shire"))
 
-ggplot() +
-  geom_sf(data = LGA, color = "black") +
-  geom_sf(data = LGA_SEQ, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
-  theme_minimal() +
-  theme(legend.position = "none") +
-  labs(title = "Local Government Areas Queensland (SEQ in purple)")
-  
-
-ggplot() +
-  geom_sf(data = LGA_SEQ, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
-  theme_minimal() +
-  theme(legend.position = "none") +
-  labs(title = "Local Government Areas South East Queensland (SEQ)")
-
 ```
-## Merge into a single polygon
 
-```{r}
 
-# Merge the SEQ LGAs into one polygon
-SEQ_extent <- st_union(LGA_SEQ)
-
-ggplot() +
-  geom_sf(data = SEQ_extent, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
-  theme_minimal() +
-  theme(legend.position = "none") +
-  ggtitle("South-East Queensland Spatial Extent") + 
-  theme_bw() 
-
-```
 
 ## Atlas of Living Australia using "galah" package
 
@@ -196,7 +179,7 @@ koala_occ_sf <- koala_occurrences %>%
 
 # Create a map using ggplot2
 ggplot() +
-  geom_sf(data = SEQ_extent, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  geom_sf(data = SEQ_extent.vect, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
   geom_sf(data = koala_occ_sf,                           # Add koala presence locations
           aes(geometry = geometry),
              color = "blue", size = 0.5) +               # Add points for occurrences
@@ -210,7 +193,6 @@ ggplot() +
 ```{r}
 
 # Convert our SEQ extent to a SpatExtent object by converting to a SpatVector
-SEQ_extent.vect <- terra::vect(SEQ_extent)
 ext <- terra::ext(SEQ_extent.vect)
 
 # Check and see that we have a SpatExtent
@@ -269,11 +251,4 @@ writeVector(background, "Data/Biological_records/background_points_50k_random.sh
 
 ```
 
-## Save SEQ extent
-
-```{r}
-
-writeVector(SEQ_extent.vect, "Data/Environmental_variables/SEQ_extent.shp", overwrite = T)
-
-```
 
