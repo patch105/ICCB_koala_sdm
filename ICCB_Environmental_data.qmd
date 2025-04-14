@@ -34,20 +34,41 @@ abstract: |
 library(terra)
 library(dplyr)
 library(sf)
-library(here)
 library(ggplot2)
 
 ```
+
 ## Load South East Queensland (SEQ) boundary
+
+We start by defining our study area, which is the South East Queensland (SEQ) region. We will use the Local Government Areas (LGA) shapefile to define the extent of SEQ.
 
 https://qldspatial.information.qld.gov.au/catalogue/custom/detail.page?fid={3F3DBD69-647B-4833-B0A5-CC43D5E70699}
 
 ```{r}
 
-LGA <- read_sf(here("Data/Environmental_variables/Local_Government_Areas.shp")) 
+# Load the study area shapefile
+LGA <- st_read("Data/Environmental_variables/Local_Government_Areas.shp")
 
-LGA_SEQ <- read_sf(here("Data/Environmental_variables/Local_Government_Areas.shp")) %>% 
-  filter(lga %in% c("Brisbane City", "Moreton Bay City", "Logan City", "Ipswich City", "Redland City", "Scenic Rim Regional", "Somerset Regional", "Lockyer Valley Regional", "Gold Coast City", "Sunshine Coast Regional", "Toowoomba Regional", "Noosa Shire"))
+# Check the coordinate reference system (CRS)
+st_crs(LGA)
+
+# Convert to WGS84
+LGA <- LGA %>% st_transform(4326)
+
+# Select local govt. areas for South East Queensland
+LGA_SEQ <- LGA %>% 
+  filter(lga %in% c("Brisbane City", 
+                    "Moreton Bay City", 
+                    "Logan City", 
+                    "Ipswich City", 
+                    "Redland City", 
+                    "Scenic Rim Regional", 
+                    "Somerset Regional", 
+                    "Lockyer Valley Regional", 
+                    "Gold Coast City", 
+                    "Sunshine Coast Regional", 
+                    "Toowoomba Regional", 
+                    "Noosa Shire"))
 
 ggplot() +
   geom_sf(data = LGA, color = "black") +
@@ -63,15 +84,31 @@ ggplot() +
   theme(legend.position = "none") +
   labs(title = "Local Government Areas South East Queensland (SEQ)")
 
+```
+## Merge into a single polygon
 
-# Merge the SEQ lgas into one polygon
-LGA_SEQ <- st_union(LGA_SEQ)
+```{r}
+
+# Merge the SEQ LGAs into one polygon
+SEQ_extent <- st_union(LGA_SEQ)
 
 ggplot() +
-  geom_sf(data = LGA_SEQ, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  geom_sf(data = SEQ_extent, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
   theme_minimal() +
   theme(legend.position = "none") +
-  labs(title = "Local Government Areas South East Queensland Boundary")
+  ggtitle("South-East Queensland Spatial Extent") + 
+  theme_bw() 
 
 ```
+## Save SEQ extent for other scripts
+
+```{r}
+
+# Convert our SEQ extent to a SpatExtent object by converting to a SpatVector
+SEQ_extent.vect <- terra::vect(SEQ_extent)
+
+writeVector(SEQ_extent.vect, "Data/Environmental_variables/SEQ_extent.shp", overwrite = T)
+
+```
+
 
