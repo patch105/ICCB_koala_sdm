@@ -1,5 +1,6 @@
 # Manually added
 *.Rproj 
+environmental_layers
 
 # History files
 .Rhistory
