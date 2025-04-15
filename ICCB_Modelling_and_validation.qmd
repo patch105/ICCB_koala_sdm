@@ -38,8 +38,432 @@ library(terra)
 library(sf)
 library(predicts)
 library(blockCV)
+library(ecospat)
+library(usdm)
+library(randomForest)
+library(precrec)
 
 ```
+
+## Load koala presences and background points
+
+They are loaded as spatvectors, but we also want them as dataframes for model input requirements.
+
+```{r}
+
+koala_occ <- vect("Data/Biological_records/SEQ_koala_occurrences.shp")
+background <- vect("Data/Biological_records/background_points_50k_random.shp")
+
+# Make a dataframe of just x, y and presence
+koala_occ_df <- koala_occ %>% 
+  as.data.frame(geom = "XY") %>% 
+  dplyr::select(x,y) %>% 
+  mutate(Presence = 1)
+
+head(koala_occ_df)
+
+background_df <- background %>% 
+  as.data.frame(geom = "XY") %>% 
+  dplyr::select(x,y) %>% 
+  mutate(Presence = 0)
+
+head(background_df)
+
+# Combine to one
+pr_bg <- rbind(koala_occ_df, background_df)
+
+```
+
+## Load environmental covariates
+
+Loading current covariate rasters. 
+
+```{r}
+
+covs_current <- rast("Data/Environmental_variables/current_bioclim.tif")
+
+```
+
+## Covariate selection 
+
+### Option 1. Narrow down potential covariates based on ecological knowledge
+For this example, we had advice from CSIRO scientists who conducted an expert elicitation to gather a set of potential covariates that are likely to be important for koalas. We use this knowledge to filter out the key bioclim variables.
+
+We select the following: 
+Bio5 : Max temp of the warmest month (mainly for the northern populations)
+Bio6 : Min temp of the coldest month (mainly for southern populations, which essentially excludes alpine regions)
+Bio12 : Annual Precipitation 
+Bio15 : Precipitation seasonality (coefficient of variation) 
+
+```{r}
+
+covs_current.expert <- subset(covs_current, c("bioclim_05", "bioclim_06", "bioclim_12", "bioclim_15"))
+
+names(covs_current.expert) <- c("Max_temp_warmest_month", "Min_temp_coldest_month", "Annual_Precipitation", "Precipitation_seasonality")
+
+```
+
+
+## Check correlation and multicollinearity of covariates
+* SCOTT - CHOOSE ONE OR TWO TO LOOK AT HERE
+
+```{r}
+
+ecospat.cor.plot(covs_current.expert)
+
+usdm::vif(covs_current.expert)
+
+usdm::vifstep(covs_current.expert)
+
+corplots <- ENMTools::raster.cor.plot(covs_current.expert)
+corplots$cor.mds.plot
+
+corplots$cor.heatmap
+
+```
+
+### Option 2. Model selection 
+
+* SCOTT - CHOOSE WHETHER YOU THINK IT'S NECESSARY TO HAVE ANOTHER OPTION
+
+```{r}
+
+
+
+
+```
+
+
+
+## Extract environmental covariate values from presence and background locations (training locations)
+
+```{r}
+
+train_PB_covs <- terra::extract(covs_current, pr_bg[,c("x", "y")], xy = T)
+train_PB_covs <- cbind(train_PB_covs, pr_bg["Presence"])
+
+# Remove rows where there's values missing from at least one covariate
+
+print(paste0("RECORDS FROM ", nrow(train_PB_covs) - sum(complete.cases(train_PB_covs)), " ROWS IN TRAINING DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
+
+train_PB_covs <- train_PB_covs[complete.cases(train_PB_covs), ] 
+train_PB_covs <- dplyr::select(train_PB_covs, -ID)
+
+```
+
+
+## Define environmental covariate values for prediction under *current* conditions
+
+```{r}
+
+pred_cur_covs <- as.data.frame(covs_current, xy = T)
+
+print(paste0("RECORDS FROM ", nrow(pred_cur_covs) - sum(complete.cases(pred_cur_covs)), " ROWS IN PREDICTION DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
+
+# Remove rows with NA in any covariates
+pred_cur_covs <- pred_cur_covs[complete.cases(pred_cur_covs), ]
+
+```
+
+## GLM
+* SCOTT - didn't get far with this - can delete...?
+
+```{r}
+
+# Make a folder to save outputs
+
+dir.create("Outputs/GLM_outputs", showWarnings = F)
+
+```
+
+```{r}
+
+m1 <- glm(Presence ~ cov1 + cov2 + cov3, data=train_PB_covs)
+
+summary(m1)
+
+response()
+
+```
+
+## Random forest
+
+```{r}
+
+# Make a folder to save outputs
+
+dir.create("Outputs/RF_outputs", showWarnings = F)
+
+```
+
+Normalise the covariates
+
+```{r}
+
+for (v in cov_names) {
+  
+   meanv <- mean(train_PB_covs[, v])
+   sdv <- sd(train_PB_covs[, v])
+   train_PB_covs_scv_norm[, v] <- (train_PB_covs[, v] - meanv) / sdv
+   pred_cur_covs_norm[, v] <- (pred_cur_covs[, v] - meanv) / sdv
+
+  }
+
+```
+
+Calculate the case weights (down-weighting)
+
+```{r}
+
+prNum <- as.numeric(table(train_PB_covs$Presence)["1"]) # number of presences
+bgNum <- as.numeric(table(train_PB_covs$Presence)["0"]) # number of backgrounds
+wt <- ifelse(train_PB_covs$Presence == 1, 1, prNum / bgNum) # down-weighting
+  
+
+```
+
+```{r}
+
+# Convert the response to factor for producing class relative likelihood
+  train_PB_covs$Presence <- as.factor(train_PB_covs$Presence)
+  
+  # For down-sampling, the number of background (0s) in each bootstrap sample should the same as presences
+  # (1s). For this, we use sampsize argument to do this.
+  smpsize <- c("0" = prNum, "1" = prNum)
+  
+  rf <- randomForest::randomForest(formula = Presence ~.,
+                                   data = train_PB_covs,
+                                   ntree = 1000,
+                                   sampsize = smpsize,
+                                   replace = T)
+
+```
+
+
+## Maxent
+
+```{r}
+
+# Make a folder to save outputs
+  
+dir.create("Outputs/Maxent_outputs", showWarnings = F)
+
+
+```
+
+
+```{r}
+
+maxent.mod <- NULL
+
+maxent.mod <- dismo::maxent(x = select(train_PB_covs, -c(Presence, x, y)),
+                              p = train_PB_covs[["Presence"]],
+                              removeDuplicates = FALSE,
+                              path = "Outputs/Maxent_outputs",
+                              args = c("nothreshold"))
+  
+  
+```
+
+## Looking at model results
+* SCOTT - CHOOSE SOME STUFF TO LOOK AT E.G. PARTIAL EFFECTS, COEFFICIENTS ETC.
+
+
+## Predict to the current environmental conditions
+
+```{r}
+
+# Current prediction
+pred_cur.mxt <- dismo::predict(maxent.mod, pred_cur_covs, args = "doclamp=false")
+pred_cur.mxt <- cbind(pred_cur_covs, pred_cur.mxt)
+colnames(pred_cur.mxt)[grepl("pred", colnames(pred_cur.mxt))] <- "pred"
+
+pred_cur.rast <- rast(pred_cur.mxt[, c("x", "y", "pred")], type = "xyz", crs = "EPSG:3112")
+
+plot(pred_cur.rast)
+
+```
+
+## Sampling bias 
+* SCOTT - GET ACCESSIBILITY LAYER READY (MAYBE IN ENVIRO_DATA FOLDER) AND ADD TO MODEL HERE 
+
+Now, we will re-run the above model with a covariate to account for sampling bias. We'll plot the models with and without a sampling covariate to see the difference in models. 
+
+
+```{r}
+
+
+
+```
+
+
+
+## Model evaluation with spatial block cross-validation
+
+First, we're going to randomly subset the data because this is just an indicative example and it will make things run faster.
+*SCOTT - EITHER SUBSET DATA HERE OR SAVE THE SPATIAL FOLDS BELOW SO THAT PEOPLE CAN JUST LOAD THEM RATHER THAN RUNNING CV_SPATIAL FUNCTION
+
+```{r}
+
+
+
+```
+
+
+```{r}
+
+# Convert training data to sf
+train_PB_sf <- st_as_sf(train_PB_covs[, c("x", "y", "Presence")], coords = c("x", "y"), crs = "EPSG:3112")
+
+# Generate spatial blocks
+spblock <- cv_spatial(x = train_PB_sf, 
+                      column = "Presence",
+                      r = NULL,
+                      size = 50000, # Size of the blocks in metres
+                      k = 5,
+                      hexagon = TRUE,
+                      selection = "random",
+                      iteration = 100, # to find evenly-dispersed folds
+                      biomod2 = FALSE)
+
+cv_plot(cv = spblock,
+        x = train_PB_sf,
+        points_alpha = 0.5,
+        nrow = 2)
+
+
+# Extract the folds to save 
+spfolds <- spblock$folds_list
+
+# We now have a list of 5 folds, where the first object is the training data, and the second is the testing data
+str(spfolds)
+
+```
+
+# Run the model for every fold and evaluate
+
+
+## Model evaluation - metrics
+
+Typically, it helps to evaluate your model with several metrics that describe different features of model performance and prediction. Here, we define a function to feed in a model prediction and calculate several evaluation metrics. 
+
+The metrics are:
+-Area under the receiver operating characteristic curve (AUC ROC)
+-Continuous boyce index
+
+
+```{r}
+
+  # Make an evaluation function
+  evaluate_prediction <- function(x){
+  
+  ROC = precrec::auc(precrec::evalmod(scores = x$pred, labels = x$Presence))[1,4]
+ 
+  boyce = ecospat::ecospat.boyce(fit = x$pred, 
+                                 obs = x$pred[which(x$Presence==1)], 
+                                 nclass = 0, # Calculate continuous index
+                                 method = "pearson",
+                                 PEplot = T)[["cor"]]
+  
+  eval_df <- data.frame(ROC = ROC,
+                        boyce = boyce)
+                        
+ return(eval_df)
+  
+}
+
+```
+
+
+```{r}
+
+# Start a dataframe to save results
+eval_df <- data.frame(fold = numeric(),
+                      ROC = numeric(),
+                      boyce = numeric())
+
+for(f in seq_along(spfolds)) {
+  
+  # Subset the training and testing data (spatial cross validation) (for the fth fold)
+  
+  train_PB_covs_scv <- train_PB_covs[spfolds[[f]][[1]], ]
+  test_PB_covs_scv <- train_PB_covs[spfolds[[f]][[2]], ]
+  
+  maxent.mod <- NULL
+  maxent.mod <- dismo::maxent(x = select(train_PB_covs_scv, -c(Presence, x, y)),
+                              p = train_PB_covs_scv[["Presence"]],
+                              removeDuplicates = FALSE,
+                              path = "Outputs/Maxent_outputs",
+                              args = c("nothreshold"))
+  
+  # Predict to the testing data of fold f
+  pred_test.mxt <- dismo::predict(maxent.mod, test_PB_covs_scv, args = "doclamp=false")
+  pred_test.mxt <- cbind(test_PB_covs_scv, pred_test.mxt)
+  colnames(pred_test.mxt)[grepl("pred", colnames(pred_test.mxt))] <- "pred"
+  
+  # Evaluate prediction on test set
+  ROC = precrec::auc(precrec::evalmod(scores = pred_test.mxt$pred, labels = pred_test.mxt$Presence))[1,4]
+ 
+  boyce = ecospat::ecospat.boyce(fit = pred_test.mxt$pred, 
+                                 obs = pred_test.mxt$pred[which(pred_test.mxt$Presence==1)], 
+                                 nclass = 0, # Calculate continuous index
+                                 method = "pearson",
+                                 PEplot = T)[["cor"]]
+  
+  # Add results to dataframe
+  eval_df <- eval_df %>% add_row(fold = f, ROC = ROC, boyce = boyce)
+
+  
+}
+
+```
+
+## Summarise the evaluation metrics
+
+```{r}
+
+# Mean AUC & boyce
+eval_df %>% 
+  summarise(mean_AUC = mean(ROC),
+            mean_boyce = mean(boyce))
+
+
+```
+
+
+## Load future environmental data
+
+```{r}
+
+covs_future <- rast("Data/Environmental_variables/future_bioclim.2090.SSP370.tif")
+
+```
+
+
+## Define environmental covariate values for prediction under *future* conditions
+
+```{r}
+
+pred_fut_covs <- as.data.frame(covs, xy = T)
+
+print(paste0("RECORDS FROM ", nrow(pred_fut_covs) - sum(complete.cases(pred_fut_covs)), " ROWS IN PREDICTION DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
+
+# Remove rows with NA in any covariates
+pred_fut_covs <- pred_fut_covs[complete.cases(pred_fut_covs), ]
+pred_fut_covs <- dplyr::select(pred_fut_covs, -ID)
+
+```
+
+## Test the environmental distance between current data and future conditions
+
+```{r}
+
+
+
+```
+
+
+
 
 ## Sampling bias
 
@@ -145,233 +569,5 @@ accessibility_rast <- sqrt(accessibility_rast)
 The human population density was taken from:
 https://www.abs.gov.au/AUSSTATS/abs@.nsf/DetailsPage/1270.0.55.0072011?OpenDocument
 
-
-```{r}
-
-library(sampbias)
-
-
-```
-
-## Load koala presences and background points
-
-They are loaded as spatvectors, but we also want them as dataframes for model input requirements.
-
-```{r}
-
-koala_occ <- vect("Data/Biological_records/SEQ_koala_occurrences.shp")
-background <- vect("Data/Biological_records/background_points_50k_random.shp")
-
-# Make a dataframe of just x, y and presence
-koala_occ_df <- koala_occ %>% 
-  as.data.frame(geom = "XY") %>% 
-  dplyr::select(x,y) %>% 
-  mutate(Presence = 1)
-
-head(koala_occ_df)
-
-background_df <- background %>% 
-  as.data.frame(geom = "XY") %>% 
-  dplyr::select(x,y) %>% 
-  mutate(Presence = 0)
-
-head(background_df)
-
-# Combine to one
-pr_bg <- rbind(koala_occ_df, background_df)
-
-```
-
-## Load environmental covariates
-
-```{r}
-
-
-
-```
-
-## Extract environmental covariate values from presence and background locations (training locations)
-
-```{r}
-
-train_PB_covs <- terra::extract(covs, pr_bg[,c("x", "y")], xy = T)
-train_PB_covs <- cbind(train_PB_covs, pr_bg["Presence"])
-
-# Remove rows where there's values missing from at least one covariate
-
-print(paste0("RECORDS FROM ", nrow(train_PB_covs) - sum(complete.cases(train_PB_covs)), " ROWS IN TRAINING DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
-
-train_PB_covs <- train_PB_covs[complete.cases(train_PB_covs), ] 
-train_PB_covs <- dplyr::select(train_PB_covs, -ID)
-
-```
-
-## Define environmental covariate values for prediction under *current* conditions
-
-```{r}
-
-pred_cur_covs <- as.data.frame(covs, xy = T)
-
-print(paste0("RECORDS FROM ", nrow(pred_cur_covs) - sum(complete.cases(pred_cur_covs)), " ROWS IN PREDICTION DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
-
-# Remove rows with NA in any covariates
-pred_cur_covs <- pred_cur_covs[complete.cases(pred_cur_covs), ]
-pred_cur_covs <- dplyr::select(pred_cur_covs, -ID)
-
-```
-
-
-## Maxent
-
-```{r}
-
-# Make a folder to save outputs
-  
-dir.create("Outputs/Maxent_outputs", showWarnings = F)
-
-
-```
-
-
-```{r}
-
-maxent.mod <- NULL
-
-maxent.mod <- predicts::MaxEnt(x = train_PB_covs[, cov_names],
-                               p = train_PB_covs[["Presence"]],
-                               removeDuplicates = FALSE,
-                               path = "Outputs/Maxent_outputs",
-                               args = c("nothreshold"))
-
-maxent.mod <- dismo::maxent(x = train_PB_covs[, cov_names],
-                              p = train_PB_covs[["Presence"]],
-                              removeDuplicates = FALSE,
-                              path = "Outputs/Maxent_outputs",
-                              args = c("nothreshold"))
-  
-  
-```
-
-
-
-## Model evaluation with spatial block cross-validation
-
-```{r}
-
-# Convert training data to sf
-train_PB_sf <- st_as_sf(train_PB_covs[, c("x", "y", "Presence")], coords = c("x", "y"), crs = "EPSG:3031")
-
-# Generate spatial blocks
-spblock <- cv_spatial(x = train_PB_sf, 
-                      column = "Presence",
-                      r = NULL,
-                      size = 1000, # Size of the blocks in metres
-                      k = 5,
-                      hexagon = TRUE,
-                      selection = "random",
-                      iteration = 100, # to find evenly-dispersed folds
-                      biomod2 = FALSE)
-
-cv_plot(cv = spblock,
-        x = train_PB_sf,
-        points_alpha = 0.5,
-        nrow = 2)
-
-
-```
-
-
-
-```{r}
-
-# Testing set prediction
-  pred_test.mxt <- dismo::predict(maxent.mod, test_PB_covs_scv, args = "doclamp=false")
-  pred_test.mxt <- cbind(test_PB_covs_scv, pred_test.mxt)
-  colnames(pred_test.mxt)[grepl("pred", colnames(pred_test.mxt))] <- "pred"
-  
-  # Make an evaluation function
-  evaluate_prediction <- function(x){
-  
-  ROC = precrec::auc(precrec::evalmod(scores = x$pred, labels = x$Presence))[1,4]
-  PRG = prg::calc_auprg(prg::create_prg_curve(labels = x$Presence, pos_scores = x$pred))
-  boyce = ecospat::ecospat.boyce(fit = x$pred, 
-                                 obs = x$pred[which(x$Presence==1)], 
-                                 nclass = 0, # Calculate continuous index
-                                 method = "pearson",
-                                 PEplot = T)[["cor"]]
-  
-  partialROC = kuenm::kuenm_proc(occ.test = x$pred[which(x$Presence==1)],
-                                 model = x$pred,
-                                 threshold = 80,   # Omission threshold (e.g., 80%)
-                                 rand.percent = 50, # What percent of testing data for bootstrap
-                                 iterations = 500)$pROC_summary[[1]]
-  
-  eval_df <- data.frame(ROC = ROC,
-                        PRG = PRG,
-                        boyce = boyce,
-                        partialROC = partialROC) 
-
- return(eval_df)
-  
-}
-
-  
-  # Evaluate prediction on test set
-  eval <- evaluate_prediction(pred_test.mxt)
-  
-  eval_df.mxt <- data.frame(group = group, 
-                            fold = f, 
-                            model = "MaxEnt", 
-                            eval)
-
-  # Current prediction
-  pred_cur.mxt <- dismo::predict(maxent.mod, pred_cur_covs, args = "doclamp=false")
-  pred_cur.mxt <- cbind(pred_cur_covs, pred_cur.mxt)
-  colnames(pred_cur.mxt)[grepl("pred", colnames(pred_cur.mxt))] <- "pred"
-  # pred_cur.rast <- rast(pred_cur[, c("x", "y", "pred")], type = "xyz", crs = "EPSG:3031")
-  
-  # Future prediction
-  # pred_fut.mxt <- dismo::predict(maxent.mod, pred_fut_covs, args = "doclamp=false")
-  
-  # plet(pred.rast, "pred", tiles = "")
-  # 
-  # plet(pred.rast, "pred", tiles = "") %>% 
-  #   points(background, col = "white", cex = 0.5, popup = T) %>% 
-  #   points(bio.recordsVect, col = "red", cex = 0.5, popup = T)
-
-```
-
-
-
-## Re-running Maxent with spatial block cross validation
-
-```{r}
-
-
-
-```
-
-
-
-
-## Define environmental covariate values for prediction under *future* conditions
-
-```{r}
-
-pred_fut_covs <- as.data.frame(covs, xy = T)
-
-print(paste0("RECORDS FROM ", nrow(pred_fut_covs) - sum(complete.cases(pred_fut_covs)), " ROWS IN PREDICTION DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
-
-# Remove rows with NA in any covariates
-pred_fut_covs <- pred_fut_covs[complete.cases(pred_fut_covs), ]
-pred_fut_covs <- dplyr::select(pred_fut_covs, -ID)
-
-```
-
-## Test the environmental distance between current data and future conditions
-
-```{r}
-
-```
 
 
