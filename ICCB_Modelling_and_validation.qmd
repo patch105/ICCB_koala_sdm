@@ -97,9 +97,18 @@ Bio15 : Precipitation seasonality (coefficient of variation)
 
 ```{r}
 
-covs_current.expert <- subset(covs_current, c("bioclim_05", "bioclim_06", "bioclim_12", "bioclim_15"))
+covs_current_expert <- subset(covs_current, c("bioclim_05", "bioclim_06", "bioclim_12", "bioclim_15"))
+names(covs_current_expert) <- c("Max_temp_warmest_month", "Min_temp_coldest_month", "Annual_Precipitation", "Precipitation_seasonality")
 
-names(covs_current.expert) <- c("Max_temp_warmest_month", "Min_temp_coldest_month", "Annual_Precipitation", "Precipitation_seasonality")
+```
+
+## Plot the layers
+
+```{r}
+
+for(i in 1:nlyr(covs_current_expert)) {
+  terra::plot(covs_current_expert[[i]], main = names(covs_current_expert)[[i]])
+}
 
 ```
 
@@ -109,13 +118,13 @@ names(covs_current.expert) <- c("Max_temp_warmest_month", "Min_temp_coldest_mont
 
 ```{r}
 
-ecospat.cor.plot(covs_current.expert)
+ecospat.cor.plot(covs_current_expert)
 
-usdm::vif(covs_current.expert)
+usdm::vif(covs_current_expert)
 
-usdm::vifstep(covs_current.expert)
+usdm::vifstep(covs_current_expert)
 
-corplots <- ENMTools::raster.cor.plot(covs_current.expert)
+corplots <- ENMTools::raster.cor.plot(covs_current_expert)
 corplots$cor.mds.plot
 
 corplots$cor.heatmap
@@ -133,8 +142,6 @@ corplots$cor.heatmap
 
 ```
 
-
-
 ## Extract environmental covariate values from presence and background locations (training locations)
 
 ```{r}
@@ -150,7 +157,6 @@ train_PB_covs <- train_PB_covs[complete.cases(train_PB_covs), ]
 train_PB_covs <- dplyr::select(train_PB_covs, -ID)
 
 ```
-
 
 ## Define environmental covariate values for prediction under *current* conditions
 
@@ -175,6 +181,8 @@ pred_cur_covs <- pred_cur_covs[complete.cases(pred_cur_covs), ]
 dir.create("Outputs/GLM_outputs", showWarnings = F)
 
 ```
+
+
 
 ```{r}
 
