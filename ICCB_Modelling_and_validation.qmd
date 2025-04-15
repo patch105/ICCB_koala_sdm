@@ -85,6 +85,7 @@ Loading current covariate rasters.
 
 covs_current <- rast("Data/Environmental_variables/current_bioclim.tif")
 
+
 # Define the BIOCLIM names for the raster layers
 layer_names <- c(
   "BIO1_Annual_Mean_Temp",
@@ -244,7 +245,7 @@ train_PB_covs_pres <- train_PB_covs %>% filter(Presence == 1)
 train_PB_covs_bg <- train_PB_covs %>% filter(Presence == 0)
 
 # Thin the presences for plotting
-train_PB_covs_pres_thin <- train_PB_covs_pres[sample(nrow(train_PB_covs_pres), 1000), ]
+train_PB_covs_pres_thin <- train_PB_covs_pres[sample(nrow(train_PB_covs_pres), 10000), ]
 
 # Combine back into both presence and background
 train_PB_covs_thinned <- rbind(train_PB_covs_pres_thin, train_PB_covs_bg)
@@ -299,7 +300,7 @@ glm_model_1 <- glm(Presence ~
                      BIO6_Min_Temp_Coldest_Month + 
                      BIO12_Annual_Precipitation + 
                      BIO15_Precip_Seasonality,
-                   data=train_PB_covs,
+                   data=train_PB_covs_thinned,
                    family = binomial(link = "logit"))
 
 # Check the model results
@@ -318,7 +319,7 @@ glm_model_2 <- glm(Presence ~
                      BIO6_Min_Temp_Coldest_Month + I(BIO6_Min_Temp_Coldest_Month^2) + 
                      BIO12_Annual_Precipitation + I(BIO12_Annual_Precipitation^2) + 
                      BIO15_Precip_Seasonality + I(BIO15_Precip_Seasonality^2), 
-                   data=train_PB_covs,
+                   data=train_PB_covs_thinned,
                    family = binomial(link = "logit"))
 
 # Check the model results
@@ -791,6 +792,53 @@ eval_df %>%
 ```{r}
 
 covs_future <- rast("Data/Environmental_variables/future_bioclim.2090.SSP370.tif")
+names(covs_future) <- layer_names
+covs_future
+
+covs_future_expert <- subset(covs_future, names(covs_future) %in% c("BIO5_Max_Temp_Warmest_Month", 
+                                                                    "BIO6_Min_Temp_Coldest_Month", 
+                                                                    "BIO12_Annual_Precipitation", 
+                                                                    "BIO15_Precip_Seasonality"))
+
+```
+
+## GLM future predictions
+
+### Model 1
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_model_1 <- predict(covs_future_expert, glm_model_1, type = "response")
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_model_1,
+  main = "Predicted Probability of Presence of Koalas in SEQ"
+)
+
+```
+
+```{r}
+
+plot(covs_current_expert)
+plot(covs_future_expert)
+
+```
+
+
+### Model 2
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_model_2 <- predict(covs_future_expert, glm_model_2, type = "response")
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_model_2,
+  main = "Predicted Probability of Presence of Koalas in SEQ"
+)
 
 ```
 
