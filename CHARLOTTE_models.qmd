@@ -662,25 +662,14 @@ Now, we will re-run the above model with a covariate to account for sampling bia
 
 ## Model evaluation with spatial block cross-validation
 
-First, we're going to randomly subset the data because this is just an indicative example and it will make things run faster. 
-
-```{r}
-
-train_PB_covs_pres_thin
-
-
-
-```
-
-
 
 ```{r}
 
 # Convert training data to sf
-train_PB_covs_pres_thin_sf <- st_as_sf(train_PB_covs_pres_thin[, c("x", "y", "Presence")], coords = c("x", "y"), crs = "EPSG:3112")
+train_PB_covs_thinned_sf <- st_as_sf(train_PB_covs_thinned[, c("x", "y", "Presence")], coords = c("x", "y"), crs = "EPSG:3112")
 
 # Generate spatial blocks
-spblock <- cv_spatial(x = train_PB_sf, 
+spblock <- cv_spatial(x = train_PB_covs_thinned_sf, 
                       column = "Presence",
                       r = NULL,
                       size = 50000, # Size of the blocks in metres
@@ -691,7 +680,7 @@ spblock <- cv_spatial(x = train_PB_sf,
                       biomod2 = FALSE)
 
 cv_plot(cv = spblock,
-        x = train_PB_sf,
+        x = train_PB_covs_thinned_sf,
         points_alpha = 0.5,
         nrow = 2)
 
@@ -710,29 +699,15 @@ str(spfolds)
 
 Typically, it helps to evaluate your model with several metrics that describe different features of model performance and prediction. Here, we define a function to feed in a model prediction and calculate several evaluation metrics.
 
-The metrics are: -Area under the receiver operating characteristic curve (AUC ROC) -Continuous boyce index
+The metrics are: 
 
-```{r}
+-Area under the receiver operating characteristic curve (AUC ROC) 
 
-  # Make an evaluation function
-  evaluate_prediction <- function(x){
-  
-  ROC = precrec::auc(precrec::evalmod(scores = x$pred, labels = x$Presence))[1,4]
- 
-  boyce = ecospat::ecospat.boyce(fit = x$pred, 
-                                 obs = x$pred[which(x$Presence==1)], 
-                                 nclass = 0, # Calculate continuous index
-                                 method = "pearson",
-                                 PEplot = T)[["cor"]]
-  
-  eval_df <- data.frame(ROC = ROC,
-                        boyce = boyce)
-                        
- return(eval_df)
-  
-}
+Higher values of this (closer to 1) suggest a model is good at distinguishing presence points from the background. 
 
-```
+-Continuous boyce index
+
+Higher values of this (closer to 1) suggest a model is good at predicting higher suitability at spots where there were presences. 
 
 ```{r}
 
@@ -745,29 +720,28 @@ for(f in seq_along(spfolds)) {
   
   # Subset the training and testing data (spatial cross validation) (for the fth fold)
   
-  train_PB_covs_scv <- train_PB_covs[spfolds[[f]][[1]], ]
-  test_PB_covs_scv <- train_PB_covs[spfolds[[f]][[2]], ]
+  train_PB_covs_scv <- train_PB_covs_thinned[spfolds[[f]][[1]], ]
+  test_PB_covs_scv <- train_PB_covs_thinned[spfolds[[f]][[2]], ]
   
-  maxent.mod <- NULL
-  maxent.mod <- dismo::maxent(x = select(train_PB_covs_scv, -c(Presence, x, y)),
-                              p = train_PB_covs_scv[["Presence"]],
-                              removeDuplicates = FALSE,
-                              path = "Outputs/Maxent_outputs",
-                              args = c("nothreshold"))
+  glm_model_1 <- glm(Presence ~ 
+                     BIO5_Max_Temp_Warmest_Month + 
+                     BIO6_Min_Temp_Coldest_Month + 
+                     BIO12_Annual_Precipitation + 
+                     BIO15_Precip_Seasonality,
+                   data=train_PB_covs_scv,
+                   family = binomial(link = "logit"))
   
-  # Predict to the testing data of fold f
-  pred_test.mxt <- dismo::predict(maxent.mod, test_PB_covs_scv, args = "doclamp=false")
-  pred_test.mxt <- cbind(test_PB_covs_scv, pred_test.mxt)
-  colnames(pred_test.mxt)[grepl("pred", colnames(pred_test.mxt))] <- "pred"
-  
+    # Predict to the testing data of fold f
+  test_PB_covs_scv$pred <- predict(glm_model_1, newdata = test_PB_covs_scv, type = "response")
+
   # Evaluate prediction on test set
-  ROC = precrec::auc(precrec::evalmod(scores = pred_test.mxt$pred, labels = pred_test.mxt$Presence))[1,4]
+  ROC = precrec::auc(precrec::evalmod(scores = test_PB_covs_scv$pred, labels = test_PB_covs_scv$Presence))[1,4]
  
-  boyce = ecospat::ecospat.boyce(fit = pred_test.mxt$pred, 
-                                 obs = pred_test.mxt$pred[which(pred_test.mxt$Presence==1)], 
+  boyce = ecospat::ecospat.boyce(fit = test_PB_covs_scv$pred, 
+                                 obs = test_PB_covs_scv$pred[which(test_PB_covs_scv$Presence==1)], 
                                  nclass = 0, # Calculate continuous index
                                  method = "pearson",
-                                 PEplot = T)[["cor"]]
+                                 PEplot = F)[["cor"]]
   
   # Add results to dataframe
   eval_df <- eval_df %>% add_row(fold = f, ROC = ROC, boyce = boyce)
@@ -784,12 +758,14 @@ for(f in seq_along(spfolds)) {
 # Mean AUC & boyce
 eval_df %>% 
   summarise(mean_AUC = mean(ROC),
-            mean_boyce = mean(boyce))
+            mean_boyce = mean(boyce),
+            sd_AUC = sd(ROC),
+            sd_boyce = sd(boyce))
 
 
 ```
 
-## Load future environmental data
+## Load future environmental data (SSP 3.70)
 
 ```{r}
 
@@ -804,6 +780,16 @@ covs_future_expert <- subset(covs_future, names(covs_future) %in% c("BIO5_Max_Te
 
 ```
 
+Plot to compare them
+
+```{r}
+
+plot(covs_current_expert)
+plot(covs_future_expert)
+
+plot(covs_future_expert - covs_current_expert)
+```
+
 ## GLM future predictions
 
 ### Model 1
@@ -816,15 +802,8 @@ predicted_raster_model_1 <- predict(covs_future_expert, glm_model_1, type = "res
 # Plot the species distribution raster
 plot(
   predicted_raster_model_1,
-  main = "Predicted Probability of Presence of Koalas in SEQ"
+  main = "Predicted Probability of Presence of Koalas in SEQ under Future Conditions"
 )
-
-```
-
-```{r}
-
-plot(covs_current_expert)
-plot(covs_future_expert)
 
 ```
 
@@ -839,22 +818,8 @@ predicted_raster_model_2 <- predict(covs_future_expert, glm_model_2, type = "res
 # Plot the species distribution raster
 plot(
   predicted_raster_model_2,
-  main = "Predicted Probability of Presence of Koalas in SEQ"
+  main = "Predicted Probability of Presence of Koalas in SEQ under Future Conditions"
 )
-
-```
-
-## Define environmental covariate values for prediction under *future* conditions
-
-```{r}
-
-pred_fut_covs <- as.data.frame(covs, xy = T)
-
-print(paste0("RECORDS FROM ", nrow(pred_fut_covs) - sum(complete.cases(pred_fut_covs)), " ROWS IN PREDICTION DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
-
-# Remove rows with NA in any covariates
-pred_fut_covs <- pred_fut_covs[complete.cases(pred_fut_covs), ]
-pred_fut_covs <- dplyr::select(pred_fut_covs, -ID)
 
 ```
 
@@ -862,9 +827,151 @@ pred_fut_covs <- dplyr::select(pred_fut_covs, -ID)
 
 ```{r}
 
+mess <- predicts::mess(covs_future_expert, 
+                       train_PB_covs_thinned[, c("BIO5_Max_Temp_Warmest_Month", 
+                                            "BIO6_Min_Temp_Coldest_Month", 
+                                            "BIO12_Annual_Precipitation", 
+                                            "BIO15_Precip_Seasonality")])
 
+plot(mess, axes = F)
+
+r_mess_mask <- mess < 0
+plot(r_mess_mask, axes=F)
 
 ```
+
+```{r}
+
+analog_fut <- predicted_raster_model_1
+
+values(analog_fut)[values(mess)<0] <- NA
+
+plot(analog_fut, main = "Predicted Probability of Presence of Koalas in SEQ under Future Conditions")
+
+novel_fut <- predicted_raster_model_1
+
+values(novel_fut)[values(mess)>0] <- NA
+
+plot(novel_fut, main = "Predicted Probability of Presence of Koalas in SEQ under Future Conditions")
+
+```
+
+## Presenting predictions with uncertainty
+
+There are many sources of model uncertainty that should be explored and ideally, presented alongside model predictions. 
+
+One that we'll focus on here is climate scenario uncertainty. We do so by fitting a second model to future climate data from a lower emission shared socioeconomic path scenario (SSP 1.26).
+
+
+## Load future environmental data (SSP 1.26)
+
+```{r}
+
+covs_future_SSP126 <- rast("Data/Environmental_variables/future_bioclim.2090.SSP126.tif")
+names(covs_future_SSP126) <- layer_names
+covs_future_SSP126
+
+covs_future_SSP126_expert <- subset(covs_future_SSP126, names(covs_future_SSP126) %in% c("BIO5_Max_Temp_Warmest_Month", 
+                                                                                          "BIO6_Min_Temp_Coldest_Month", 
+                                                                                          "BIO12_Annual_Precipitation", 
+                                                                                          "BIO15_Precip_Seasonality"))
+
+```
+
+Plot to compare the variables across the two scenarios
+
+```{r}
+
+plot(covs_future_expert)
+plot(covs_future_SSP126_expert)
+
+```
+
+## GLM future predictions (SSP 1.26)
+
+### Model 1
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_model_1_SSP126 <- predict(covs_future_SSP126_expert, glm_model_1, type = "response")
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_model_1,
+  range = c(0,1),
+  main = "SSP 3.70"
+)
+
+plot(
+  predicted_raster_model_1_SSP126,
+  range = c(0,1),
+  main = "SSP 1.26"
+)
+
+```
+
+## Model uncertainty
+
+Another element of uncertainty that can be represented is model uncertainty, or the standard error around the coefficient estimates.
+
+
+```{r}
+
+# Extract standard errors of coefficients
+
+coef_se <- summary(glm_model_1)$coefficients[, "Std. Error"]
+
+print(coef_se)
+
+```
+
+```{r}
+
+covs_df <- as.data.frame(covs_future_expert, na.rm = FALSE)
+
+pred_link <- predict(glm_model_1, newdata = covs_df, type = "link", se.fit = TRUE)
+
+# Linear predictor (eta)
+eta <- pred_link$fit
+se_eta <- pred_link$se.fit
+
+# Confidence intervals (95%)
+z <- 1.96
+eta_lower <- eta - z * se_eta
+eta_upper <- eta + z * se_eta
+
+# Transform back to response scale
+linkinv <- glm_model_1$family$linkinv
+predicted <- linkinv(eta)
+lower_ci <- linkinv(eta_lower)
+upper_ci <- linkinv(eta_upper)
+
+
+# Add to covs_df
+covs_df$predicted <- predicted
+covs_df$lower_ci <- lower_ci
+covs_df$upper_ci <- upper_ci
+
+
+predicted_r <- setValues(rast(covs_future_expert, nlyr = 1), predicted)
+lower_ci_r <- setValues(rast(covs_future_expert, nlyr = 1), lower_ci)
+upper_ci_r <- setValues(rast(covs_future_expert, nlyr = 1), upper_ci)
+
+# Step 2: Name the layers
+names(predicted_r) <- "predicted"
+names(lower_ci_r) <- "lower_CI"
+names(upper_ci_r) <- "upper_CI"
+
+prediction_w_uncertainty <- c(predicted_r, lower_ci_r, upper_ci_r)
+
+plot(prediction_w_uncertainty)
+
+```
+
+
+
+
 
 ## Sampling bias
 
