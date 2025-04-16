@@ -199,6 +199,8 @@ future_bioclim
 
 ```{r}
 
+future_bioclim <- terra::subst(from = 0, to = NA, future_bioclim) # Set all values of 0 to NA
+
 future_bioclim <- terra::mask(future_bioclim, SEQ_extent.vect)
 
 # You can see that this has masked the area but the extent is still the same
@@ -206,7 +208,7 @@ plot(future_bioclim[[1]])
 
 future_bioclim <- terra::crop(future_bioclim, SEQ_extent.vect)
 
-plot(future_bioclim)
+plot(future_bioclim[[1]])
 
 # Save the future environmental covariates
 writeRaster(future_bioclim, 
@@ -249,6 +251,8 @@ future_bioclim
 ## Mask to SEQ extent
 
 ```{r}
+
+future_bioclim <- terra::subst(from = 0, to = NA, future_bioclim) # Set all values of 0 to NA
 
 future_bioclim <- terra::mask(future_bioclim, SEQ_extent.vect)
 
