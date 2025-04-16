@@ -160,7 +160,8 @@ plot(current_bioclim)
 
 # Save the current environmental covariates
 writeRaster(current_bioclim, 
-            filename = "Data/Environmental_variables/current_bioclim.tif")
+            filename = "Data/Environmental_variables/current_bioclim.tif",
+            overwrite = T)
 
 ```
 ## Load future environmental data
@@ -208,7 +209,8 @@ future_bioclim <- terra::crop(future_bioclim, SEQ_extent.vect)
 plot(future_bioclim)
 
 # Save the future environmental covariates
-writeRaster(current_bioclim, 
-            filename = "Data/Environmental_variables/future_bioclim.2090.SSP370.tif")
+writeRaster(future_bioclim, 
+            filename = "Data/Environmental_variables/future_bioclim.2090.SSP370.tif",
+            overwrite = T)
 
 ```
