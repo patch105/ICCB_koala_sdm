@@ -46,6 +46,12 @@ library(randomForest)
 library(precrec)
 library(corrplot)
 
+# Install the mecofun package, used in the materials at https://damariszurell.github.io/SDM-Intro/
+library(devtools)
+devtools::install_git("https://gitup.uni-potsdam.de/macroecology/mecofun.git")
+# Load the mecofun package
+library(mecofun)
+
 ```
 
 ## Load koala presences and background points
@@ -306,6 +312,7 @@ glm_model_1 <- glm(Presence ~
 # Check the model results
 summary(glm_model_1)
 
+# These response curves don't look very helpful
 dismo::response(glm_model_1)
 
 ```
@@ -325,6 +332,7 @@ glm_model_2 <- glm(Presence ~
 # Check the model results
 summary(glm_model_2)
 
+# These response curves don't look very helpful
 dismo::response(glm_model_2)
 
 ```
@@ -462,58 +470,32 @@ plot_species_response <- function(glm_model, predictors, data) {
 
 ```{r}
 
-predictors <- c("BIO5_Max_Temp_Warmest_Month", "BIO6_Min_Temp_Coldest_Month", "BIO12_Annual_Precipitation", "BIO15_Precip_Seasonality")
-plot_species_response(glm_model_1, predictors, train_PB_covs)
+predictors <- c("BIO5_Max_Temp_Warmest_Month", 
+                "BIO6_Min_Temp_Coldest_Month", 
+                "BIO12_Annual_Precipitation", 
+                "BIO15_Precip_Seasonality")
+
+plot_species_response(glm_model_1, predictors, train_PB_covs_thinned)
 
 ```
 
-### Extract the coefficients for the linear and quadratic terms
+### Model 1 partial responses
 
 ```{r}
 
-bio5_linear <- glm_model_2$coefficients["BIO5_Max_Temp_Warmest_Month"]
-bio5_quadratic <- glm_model_2$coefficients["I(BIO5_Max_Temp_Warmest_Month^2)"]
-
-bio6_linear <- glm_model_2$coefficients["BIO6_Min_Temp_Coldest_Month"]
-bio6_quadratic <- glm_model_2$coefficients["I(BIO6_Min_Temp_Coldest_Month^2)"]
-
-bio12_linear <- glm_model_2$coefficients["BIO12_Annual_Precipitation"]
-bio12_quadratic <- glm_model_2$coefficients["I(BIO12_Annual_Precipitation^2)"]
-
-bio15_linear <- glm_model_2$coefficients["BIO15_Precip_Seasonality"]
-bio15_quadratic <- glm_model_2$coefficients["I(BIO15_Precip_Seasonality^2)"]
+# Plot the partial responses
+partial_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors])
 
 ```
 
-### Create some resonse curves
+### Model 2 partial responses
 
 ```{r}
 
-# Create a sequence of values for the predictor variable
-bio5_seq <- seq(min(train_PB_covs$BIO5_Max_Temp_Warmest_Month, na.rm = TRUE), 
-                 max(train_PB_covs$BIO5_Max_Temp_Warmest_Month, na.rm = TRUE), 
-                 length.out = 100)
-
-# Calculate the predicted probabilities for the linear and quadratic terms
-bio5_pred_linear <- bio5_linear * bio5_seq
-bio5_pred_quadratic <- bio5_quadratic * (bio5_seq^2)
-# Now sum together to get the BIO5 response
-bio5_pred <- bio5_pred_linear + bio5_pred_quadratic
-
-# Combine the results into a data frame for plotting
-bio5_plot_data <- data.frame(
-  BIO5_Max_Temp_Warmest_Month = bio5_seq,
-  Predicted_Probability = bio5_pred
-)
-
-ggplot() +
-  geom_line(data = bio5_plot_data, aes(x = BIO5_Max_Temp_Warmest_Month, y = Predicted_Probability), color = "#61c6fa", linewidth = 1) +
-  labs(x = "BIO5: Max Temp of Warmest Month", y = "Predicted Probability") +
-  theme_minimal() +
-  theme(axis.title.y = element_blank())
+# Plot the partial responses
+partial_response(glm_model_2, predictors = train_PB_covs_thinned[,pred])
 
 ```
-
 
 ## GLM predictions
 
@@ -522,7 +504,7 @@ ggplot() +
 ```{r}
 
 # Predict the presence probability across the entire raster extent
-predicted_raster_model_1 <- predict(covs_current_expert, glm_model_1, type = "response")
+predicted_raster_model_1 <- predicts::predict(covs_current_expert, glm_model_1, type = "response")
 
 # Plot the species distribution raster
 plot(
@@ -537,7 +519,7 @@ plot(
 ```{r}
 
 # Predict the presence probability across the entire raster extent
-predicted_raster_model_2 <- predict(covs_current_expert, glm_model_2, type = "response")
+predicted_raster_model_2 <- predicts::predict(covs_current_expert, glm_model_2, type = "response")
 
 # Plot the species distribution raster
 plot(
@@ -547,12 +529,13 @@ plot(
 
 ```
 
+## Model evaluation
+
+CHARLOTTE
 
 
 
-
-
-## Random forest
+# Random forest
 
 ```{r}
 
@@ -562,7 +545,7 @@ dir.create("Outputs/RF_outputs", showWarnings = F)
 
 ```
 
-Normalise the covariates
+
 
 ```{r}
 
@@ -577,13 +560,28 @@ for (v in cov_names) {
 
 ```
 
+## Data preparation
+
+### Normalise the covariates
+
+```{r}
+
+# Scale the covariates
+train_PB_covs_thinned_scaled <- scale(train_PB_covs_thinned[, layer_names], center = T, scale = T) 
+
+# Combine with the rest of the dataframe
+train_PB_covs_scaled <- data.frame(train_PB_covs_thinned[, c("x", "y", "Presence")],
+                                   train_PB_covs_thinned_scaled)
+
+```
+
 Calculate the case weights (down-weighting)
 
 ```{r}
 
-prNum <- as.numeric(table(train_PB_covs$Presence)["1"]) # number of presences
-bgNum <- as.numeric(table(train_PB_covs$Presence)["0"]) # number of backgrounds
-wt <- ifelse(train_PB_covs$Presence == 1, 1, prNum / bgNum) # down-weighting
+presNum <- as.numeric(table(train_PB_covs_scaled$Presence)["1"]) # number of presences
+bgNum <- as.numeric(table(train_PB_covs_scaled$Presence)["0"]) # number of backgrounds
+weight <- ifelse(train_PB_covs_scaled$Presence == 1, 1, presNum / bgNum) # down-weighting
   
 
 ```
@@ -593,18 +591,51 @@ wt <- ifelse(train_PB_covs$Presence == 1, 1, prNum / bgNum) # down-weighting
 ```{r}
 
 # Convert the response to factor for producing class relative likelihood
-  train_PB_covs$Presence <- as.factor(train_PB_covs$Presence)
-  
-  # For down-sampling, the number of background (0s) in each bootstrap sample should the same as presences
-  # (1s). For this, we use sampsize argument to do this.
-  smpsize <- c("0" = prNum, "1" = prNum)
-  
-  rf <- randomForest::randomForest(formula = Presence ~.,
-                                   data = train_PB_covs,
-                                   ntree = 1000,
-                                   sampsize = smpsize,
-                                   replace = T)
+train_PB_covs_scaled$Presence <- as.factor(train_PB_covs_scaled$Presence)
 
+# For down-sampling, the number of background (0s) in each bootstrap sample should the same as presences
+# (1s). For this, we use sampsize argument to do this.
+# We need to choose the SMALLER number out of the two classes
+sample_size <- c("0" = bgNum, "1" = bgNum)
+
+model_formula <- as.formula(Presence ~ 
+                              BIO5_Max_Temp_Warmest_Month + 
+                              BIO6_Min_Temp_Coldest_Month + 
+                              BIO12_Annual_Precipitation + 
+                              BIO15_Precip_Seasonality)
+
+rf_1 <- randomForest::randomForest(formula = model_formula,
+                                 data = train_PB_covs_scaled,
+                                 ntree = 1000,
+                                 sampsize = sample_size,
+                                 replace = T)
+
+```
+
+## Maxent
+
+```{r}
+
+# Make a folder to save outputs
+  
+dir.create("Outputs/Maxent_outputs", showWarnings = F)
+
+
+```
+
+
+
+```{r}
+
+maxent.mod <- NULL
+
+maxent.mod <- dismo::maxent(x = select(train_PB_covs, -c(Presence, x, y)),
+                              p = train_PB_covs[["Presence"]],
+                              removeDuplicates = FALSE,
+                              path = "Outputs/Maxent_outputs",
+                              args = c("nothreshold"))
+  
+  
 ```
 
 ## Looking at model results
