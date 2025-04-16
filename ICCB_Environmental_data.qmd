@@ -214,3 +214,55 @@ writeRaster(future_bioclim,
             overwrite = T)
 
 ```
+
+## Load future environmental data 2
+
+Here we load outputs from a low emissions shared socio-economic path scenario (SSP 1.26) for the year 2090 (2080 - 2099).
+
+```{r}
+
+files <- list.files("Data/Environmental_variables/Future_climate_SSP126_2090", 
+             pattern = ".tif$", 
+             full.names = TRUE)
+
+# Load all bioclim rasters
+future_bioclim <- lapply(files, terra::rast) 
+
+# Make into one raster stack
+future_bioclim <- rast(future_bioclim)
+
+plot(future_bioclim)
+
+# Examine the resolution
+future_bioclim
+
+# Check the CRS
+crs(future_bioclim)
+
+# Update CRS 
+future_bioclim <- terra::project(future_bioclim, "EPSG:3112")
+
+# Our resolution is now ~5km by 5km
+future_bioclim
+
+```
+## Mask to SEQ extent
+
+```{r}
+
+future_bioclim <- terra::mask(future_bioclim, SEQ_extent.vect)
+
+# You can see that this has masked the area but the extent is still the same
+plot(future_bioclim[[1]])
+
+future_bioclim <- terra::crop(future_bioclim, SEQ_extent.vect)
+
+plot(future_bioclim)
+
+# Save the future environmental covariates
+writeRaster(future_bioclim, 
+            filename = "Data/Environmental_variables/future_bioclim.2090.SSP126.tif",
+            overwrite = T)
+
+```
+
