@@ -588,6 +588,8 @@ wt <- ifelse(train_PB_covs$Presence == 1, 1, prNum / bgNum) # down-weighting
 
 ```
 
+
+
 ```{r}
 
 # Convert the response to factor for producing class relative likelihood
@@ -603,30 +605,6 @@ wt <- ifelse(train_PB_covs$Presence == 1, 1, prNum / bgNum) # down-weighting
                                    sampsize = smpsize,
                                    replace = T)
 
-```
-
-## Maxent
-
-```{r}
-
-# Make a folder to save outputs
-  
-dir.create("Outputs/Maxent_outputs", showWarnings = F)
-
-
-```
-
-```{r}
-
-maxent.mod <- NULL
-
-maxent.mod <- dismo::maxent(x = select(train_PB_covs, -c(Presence, x, y)),
-                              p = train_PB_covs[["Presence"]],
-                              removeDuplicates = FALSE,
-                              path = "Outputs/Maxent_outputs",
-                              args = c("nothreshold"))
-  
-  
 ```
 
 ## Looking at model results
