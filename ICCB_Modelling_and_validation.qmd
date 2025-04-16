@@ -487,7 +487,7 @@ plot_species_response(glm_model_1, predictors, train_PB_covs_thinned)
 partial_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors], main='GLM')
 
 # Plot inflated response curves:
-inflated_response(glm_model_1, predictors = train_PB_covs_thinned[,pred], method = "stat3", lwd = 3, main='GLM') 
+inflated_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='GLM') 
 
 ```
 
@@ -496,10 +496,10 @@ inflated_response(glm_model_1, predictors = train_PB_covs_thinned[,pred], method
 ```{r}
 
 # Plot the partial responses
-partial_response(glm_model_2, predictors = train_PB_covs_thinned[,pred], main='GLM')
+partial_response(glm_model_2, predictors = train_PB_covs_thinned[,predictors], main='GLM')
 
 # Plot inflated response curves:
-inflated_response(glm_model_2, predictors = train_PB_covs_thinned[,pred], method = "stat3", lwd = 3, main='GLM') 
+inflated_response(glm_model_2, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='GLM') 
 
 ```
 
@@ -515,6 +515,7 @@ predicted_raster_model_1 <- predicts::predict(covs_current_expert, glm_model_1, 
 # Plot the species distribution raster
 plot(
   predicted_raster_model_1,
+  range = c(0, 1),  # Set min and max values for the color scale
   main = "Predicted Probability of Presence of Koalas in SEQ - GLM 1"
 )
 
@@ -530,6 +531,7 @@ predicted_raster_model_2 <- predicts::predict(covs_current_expert, glm_model_2, 
 # Plot the species distribution raster
 plot(
   predicted_raster_model_2,
+  range = c(0, 1),  # Set min and max values for the color scale
   main = "Predicted Probability of Presence of Koalas in SEQ - GLM 2"
 )
 
@@ -568,7 +570,7 @@ head(train_PB_covs_scaled)
 
 ```
 
-Calculate the case weights (down-weighting)
+### Calculate the case weights (down-weighting)
 
 ```{r}
 
@@ -579,12 +581,13 @@ weight <- ifelse(train_PB_covs_scaled$Presence == 1, 1, presNum / bgNum) # down-
 
 ```
 
-
+### Prepare for fitting the RF model(s)
 
 ```{r}
 
+# If wanting to fit a classification model
 # Convert the response to factor for producing class relative likelihood
-train_PB_covs_thinned$Presence <- as.factor(train_PB_covs_thinned$Presence)
+train_PB_covs_thinned$Presence_Factor <- as.factor(train_PB_covs_thinned$Presence)
 
 # For down-sampling, the number of background (0s) in each bootstrap sample should the same as presences
 # (1s). For this, we use sampsize argument to do this.
@@ -592,14 +595,36 @@ train_PB_covs_thinned$Presence <- as.factor(train_PB_covs_thinned$Presence)
 sample_size <- c("0" = bgNum, "1" = bgNum)
 sample_size <- c(bgNum)
 
-# Specify the model formula
+```
+
+## Random Forest Model 1 - expert covariates
+
+### Classification or regression model?
+
+```{r}
+
+# # Specify the model formula - classification
+# model_formula <- as.formula(Presence_Factor ~ 
+#                               BIO5_Max_Temp_Warmest_Month + 
+#                               BIO6_Min_Temp_Coldest_Month + 
+#                               BIO12_Annual_Precipitation + 
+#                               BIO15_Precip_Seasonality)
+
+# Specify the model formula - regression
 model_formula <- as.formula(Presence ~ 
                               BIO5_Max_Temp_Warmest_Month + 
                               BIO6_Min_Temp_Coldest_Month + 
                               BIO12_Annual_Precipitation + 
                               BIO15_Precip_Seasonality)
 
-# Fit the random forest model
+```
+
+### Fit the random forest model
+
+This will throw a warning as we only have two unique values (0s and 1s), but in our case that is fine, and you can ignore the warning.
+
+```{r}
+
 rf_1 <- randomForest::randomForest(formula = model_formula,
                                    data = train_PB_covs_thinned,
                                    weights = weight,
@@ -633,16 +658,14 @@ head(getTree(rf_1,1,T))
 ```{r}
 
 # Now, we plot response curves in the same way as we did for GLMs above:
-partial_response(rf_1, predictors = train_PB_covs_thinned[,pred], main='Random Forest')
+partial_response(rf_1, predictors = train_PB_covs_thinned[,predictors], main='Random Forest')
 
 # Plot inflated response curves:
-inflated_response(rf_1, predictors = train_PB_covs_thinned[,pred], method = "stat3", lwd = 3, main='Random Forest') 
+inflated_response(rf_1, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='Random Forest') 
 
 ```
 
-## Random Forest predictions
-
-### Model 1
+### Random Forest predictions
 
 ```{r}
 
@@ -652,7 +675,76 @@ predicted_raster_RF_1 <- predicts::predict(covs_current_expert, rf_1, type = "re
 # Plot the species distribution raster
 plot(
   predicted_raster_RF_1,
+  range = c(0, 1),  # Set min and max values for the color scale
   main = "Predicted Probability of Presence of Koalas in SEQ - RF 1"
+)
+
+```
+
+## Random Forest Model 2 - all covariates
+
+
+### Fit the random forest model
+
+This will throw a warning as we only have two unique values (0s and 1s), but in our case that is fine, and you can ignore the warning.
+
+
+
+```{r}
+
+rf_2 <- randomForest::randomForest(x = train_PB_covs_thinned[, 1:19],
+                                   # y = train_PB_covs_thinned[, "Presence_Factor"], # for classification
+                                   y = train_PB_covs_thinned[, "Presence"], # for regression
+                                   weights = weight,
+                                   ntree = 1000,
+                                   sampsize = sample_size,
+                                   replace = T, 
+                                   importance=TRUE)
+
+```
+
+### Check the model results
+
+```{r}
+
+# Model summary
+rf_2
+
+# Variable importance:
+importance(rf_2)
+
+# Plot variable importance
+varImpPlot(rf_2, type = 1)
+
+# Look at single trees:
+head(getTree(rf_2,1,T))
+
+```
+
+### Partial dependence plots
+
+```{r}
+
+# Now, we plot response curves in the same way as we did for GLMs above:
+partial_response(rf_2, predictors = train_PB_covs_thinned[,layer_names], main='Random Forest')
+
+# Plot inflated response curves:
+inflated_response(rf_2, predictors = train_PB_covs_thinned[,layer_names], method = "stat3", lwd = 3, main='Random Forest') 
+
+```
+
+### Random Forest predictions
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_RF_2 <- predicts::predict(covs_current, rf_2, type = "response", na.rm=TRUE)
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_RF_2,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Predicted Probability of Presence of Koalas in SEQ - RF 2"
 )
 
 ```
@@ -662,30 +754,27 @@ plot(
 
 
 
-
-## Maxent
+# Maxent
 
 ```{r}
 
 # Make a folder to save outputs
-  
 dir.create("Outputs/Maxent_outputs", showWarnings = F)
-
 
 ```
 
-
+## Fit the model
 
 ```{r}
 
-maxent.mod <- NULL
+# Clear any previous model fits
+maxent_model_1 <- NULL
 
-maxent.mod <- dismo::maxent(x = select(train_PB_covs, -c(Presence, x, y)),
-                              p = train_PB_covs[["Presence"]],
-                              removeDuplicates = FALSE,
-                              path = "Outputs/Maxent_outputs",
-                              args = c("nothreshold"))
-  
+maxent_model_1 <- dismo::maxent(x = select(train_PB_covs_thinned, -c(Presence, x, y)),
+                            p = train_PB_covs[["Presence"]],
+                            removeDuplicates = FALSE,
+                            path = "Outputs/Maxent_outputs",
+                            args = c("nothreshold"))
   
 ```
 
@@ -698,7 +787,7 @@ maxent.mod <- dismo::maxent(x = select(train_PB_covs, -c(Presence, x, y)),
 ```{r}
 
 # Current prediction
-pred_current_maxent <- dismo::predict(maxent.mod, covs_current, args = "doclamp=false")
+pred_current_maxent <- predicts::predict(maxent.mod, covs_current, args = "doclamp=false")
 pred_current_maxent <- cbind(covs_current, pred_current_maxent)
 colnames(pred_current_maxent)[grepl("pred", colnames(pred_current_maxent))] <- "pred"
 
@@ -855,6 +944,10 @@ covs_future <- rast("Data/Environmental_variables/future_bioclim.2090.SSP370.tif
 names(covs_future) <- layer_names
 covs_future
 
+covs_future <- terra::mask(covs_future, covs_current) # Crop to SEQ extent
+
+covs_future
+
 covs_future_expert <- subset(covs_future, names(covs_future) %in% c("BIO5_Max_Temp_Warmest_Month", 
                                                                     "BIO6_Min_Temp_Coldest_Month", 
                                                                     "BIO12_Annual_Precipitation", 
@@ -862,9 +955,19 @@ covs_future_expert <- subset(covs_future, names(covs_future) %in% c("BIO5_Max_Te
 
 ```
 
-## GLM future predictions
+## Plot the future rasters
 
-### Model 1
+```{r}
+
+for(i in 1:nlyr(covs_future)) {
+  terra::plot(covs_future[[i]], main = names(covs_future)[[i]])
+}
+
+```
+
+# GLM future predictions
+
+## Model 1
 
 ```{r}
 
@@ -874,10 +977,65 @@ predicted_raster_model_1 <- predict(covs_future_expert, glm_model_1, type = "res
 # Plot the species distribution raster
 plot(
   predicted_raster_model_1,
+  range = c(0, 1),  # Set min and max values for the color scale
   main = "Predicted Probability of Presence of Koalas in SEQ"
 )
 
 ```
+
+## Model 2
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_model_2 <- predict(covs_future_expert, glm_model_2, type = "response")
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_model_2,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Predicted Probability of Presence of Koalas in SEQ"
+)
+
+```
+
+## Random Forest future predictions
+
+### Model 1
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_RF_1 <- predicts::predict(covs_future_expert, rf_1, type = "response", na.rm=TRUE)
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_RF_1,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Predicted Probability of Presence of Koalas in SEQ - RF 2"
+)
+
+```
+
+### Model 2
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_RF_2 <- predicts::predict(covs_future, rf_2, type = "response", na.rm=TRUE)
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_RF_2,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Predicted Probability of Presence of Koalas in SEQ - RF 2"
+)
+
+```
+
+
+
+
 
 ```{r}
 
