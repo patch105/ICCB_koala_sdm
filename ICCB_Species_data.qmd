@@ -48,7 +48,6 @@ library(sf)
 library(predicts)
 library(tidyterra)
 
-
 ```
 
 ## To cite the `galah` package
@@ -197,11 +196,6 @@ We need to load the environmental covariate grid to use as our template grid for
 
 covs <- rast("Data/Environmental_variables/current_bioclim.tif")
 
-```
-
-
-```{r}
-
 # Make a blank raster of all 1s of the same dimensions as our covariate grid
 domain <- covs[[1]]
 values(domain) <- 1
@@ -218,7 +212,7 @@ plot(domain)
 # Random sampling at first
 # The mask means that any NA (not SEQ) locations do not include background points
 background <- predicts::backgroundSample(mask = domain, 
-                                         n = 50000)
+                                         n = 2500)
 
 # Convert to terra SpatVector object
 background <- terra::vect(background, crs = "EPSG:3112")
@@ -241,6 +235,7 @@ ggplot() +
 
 
 ```
+
 ## Save koala presences and background points 
 This ensures quick upload in the future and that these records can be used among models. 
 
@@ -248,7 +243,7 @@ This ensures quick upload in the future and that these records can be used among
 
 writeVector(koala_occ.vect, "Data/Biological_records/SEQ_koala_occurrences.shp", overwrite = T)
 
-writeVector(background, "Data/Biological_records/background_points_50k_random.shp", overwrite = T)
+writeVector(background, "Data/Biological_records/background_points_2.5k_random.shp", overwrite = T)
 
 ```
 
