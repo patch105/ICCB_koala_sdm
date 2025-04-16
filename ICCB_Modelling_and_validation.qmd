@@ -484,7 +484,10 @@ plot_species_response(glm_model_1, predictors, train_PB_covs_thinned)
 ```{r}
 
 # Plot the partial responses
-partial_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors])
+partial_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors], main='GLM')
+
+# Plot inflated response curves:
+inflated_response(glm_model_1, predictors = train_PB_covs_thinned[,pred], method = "stat3", lwd = 3, main='GLM') 
 
 ```
 
@@ -493,7 +496,10 @@ partial_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors])
 ```{r}
 
 # Plot the partial responses
-partial_response(glm_model_2, predictors = train_PB_covs_thinned[,pred])
+partial_response(glm_model_2, predictors = train_PB_covs_thinned[,pred], main='GLM')
+
+# Plot inflated response curves:
+inflated_response(glm_model_2, predictors = train_PB_covs_thinned[,pred], method = "stat3", lwd = 3, main='GLM') 
 
 ```
 
@@ -509,7 +515,7 @@ predicted_raster_model_1 <- predicts::predict(covs_current_expert, glm_model_1, 
 # Plot the species distribution raster
 plot(
   predicted_raster_model_1,
-  main = "Predicted Probability of Presence of Koalas in SEQ"
+  main = "Predicted Probability of Presence of Koalas in SEQ - GLM 1"
 )
 
 ```
@@ -524,7 +530,7 @@ predicted_raster_model_2 <- predicts::predict(covs_current_expert, glm_model_2, 
 # Plot the species distribution raster
 plot(
   predicted_raster_model_2,
-  main = "Predicted Probability of Presence of Koalas in SEQ"
+  main = "Predicted Probability of Presence of Koalas in SEQ - GLM 2"
 )
 
 ```
@@ -545,21 +551,6 @@ dir.create("Outputs/RF_outputs", showWarnings = F)
 
 ```
 
-
-
-```{r}
-
-for (v in cov_names) {
-  
-   meanv <- mean(train_PB_covs[, v])
-   sdv <- sd(train_PB_covs[, v])
-   train_PB_covs_scv_norm[, v] <- (train_PB_covs[, v] - meanv) / sdv
-   covs_current_norm[, v] <- (covs_current[, v] - meanv) / sdv
-
-  }
-
-```
-
 ## Data preparation
 
 ### Normalise the covariates
@@ -572,6 +563,8 @@ train_PB_covs_thinned_scaled <- scale(train_PB_covs_thinned[, layer_names], cent
 # Combine with the rest of the dataframe
 train_PB_covs_scaled <- data.frame(train_PB_covs_thinned[, c("x", "y", "Presence")],
                                    train_PB_covs_thinned_scaled)
+
+head(train_PB_covs_scaled)
 
 ```
 
@@ -591,26 +584,84 @@ weight <- ifelse(train_PB_covs_scaled$Presence == 1, 1, presNum / bgNum) # down-
 ```{r}
 
 # Convert the response to factor for producing class relative likelihood
-train_PB_covs_scaled$Presence <- as.factor(train_PB_covs_scaled$Presence)
+train_PB_covs_thinned$Presence <- as.factor(train_PB_covs_thinned$Presence)
 
 # For down-sampling, the number of background (0s) in each bootstrap sample should the same as presences
 # (1s). For this, we use sampsize argument to do this.
 # We need to choose the SMALLER number out of the two classes
 sample_size <- c("0" = bgNum, "1" = bgNum)
+sample_size <- c(bgNum)
 
+# Specify the model formula
 model_formula <- as.formula(Presence ~ 
                               BIO5_Max_Temp_Warmest_Month + 
                               BIO6_Min_Temp_Coldest_Month + 
                               BIO12_Annual_Precipitation + 
                               BIO15_Precip_Seasonality)
 
+# Fit the random forest model
 rf_1 <- randomForest::randomForest(formula = model_formula,
-                                 data = train_PB_covs_scaled,
-                                 ntree = 1000,
-                                 sampsize = sample_size,
-                                 replace = T)
+                                   data = train_PB_covs_thinned,
+                                   weights = weight,
+                                   ntree = 1000,
+                                   sampsize = sample_size,
+                                   replace = T, 
+                                   importance=TRUE)
 
 ```
+
+### Check the model results
+
+```{r}
+
+# Model summary
+rf_1
+
+# Variable importance:
+importance(rf_1)
+
+# Plot variable importance
+varImpPlot(rf_1, type = 1)
+
+# Look at single trees:
+head(getTree(rf_1,1,T))
+
+```
+
+### Partial dependence plots
+
+```{r}
+
+# Now, we plot response curves in the same way as we did for GLMs above:
+partial_response(rf_1, predictors = train_PB_covs_thinned[,pred], main='Random Forest')
+
+# Plot inflated response curves:
+inflated_response(rf_1, predictors = train_PB_covs_thinned[,pred], method = "stat3", lwd = 3, main='Random Forest') 
+
+```
+
+## Random Forest predictions
+
+### Model 1
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_RF_1 <- predicts::predict(covs_current_expert, rf_1, type = "response")
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_RF_1,
+  main = "Predicted Probability of Presence of Koalas in SEQ - RF 1"
+)
+
+```
+
+
+
+
+
+
 
 ## Maxent
 
