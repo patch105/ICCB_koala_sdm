@@ -2,6 +2,7 @@
 *.Rproj 
 # environmental_layers
 zipped_folders
+EcoCommons notebooks/
 
 # History files
 .Rhistory
