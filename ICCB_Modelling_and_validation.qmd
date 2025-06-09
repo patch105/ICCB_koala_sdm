@@ -4,6 +4,7 @@ author: "Scott Forrest and Charlotte Patterson"
 date: "`r Sys.Date()`"
 execute: 
   cache: false
+  warning: false
 # bibliography: references.bib
 toc: true
 number-sections: false
@@ -24,16 +25,21 @@ format:
 editor:
   source
 abstract: |
-  In this script we are fitting species distribution models to the data of koalas (Phascolarctos cinereus) in the South-East Queensland (SEQ) region under current environmental conditions, which we will predict into future environmental conditions. 
----
+  In this script we are fitting species distribution models to the data of koalas (Phascolarctos cinereus) in the South-East Queensland (SEQ) region under current environmental conditions, which we will predict into future environmental conditions. Our modelling protocol follows these steps:
+  1. 
+  2.
+  3.
+  
+  We wrote this script drawing on some of the following resources:
 
-We wrote this script drawing on some of the following resources:
+Ecocommons Notebooks <https://www.ecocommons.org.au/notebooks/>
 
--Ecocommons Notebooks <https://www.ecocommons.org.au/notebooks/>
-
--Damaris Zurell's SDM Intro <https://damariszurell.github.io/SDM-Intro/>
+Damaris Zurell's SDM Intro <https://damariszurell.github.io/SDM-Intro/>
 
 <https://damariszurell.github.io/EEC-MGC/b4_SDM_eval.html>
+---
+
+
 
 ## Import packages
 
@@ -54,14 +60,15 @@ library(corrplot)
 
 # Install the mecofun package, used in the materials at https://damariszurell.github.io/SDM-Intro/
 library(devtools)
-devtools::install_git("https://gitup.uni-potsdam.de/macroecology/mecofun.git")
+# devtools::install_git("https://gitup.uni-potsdam.de/macroecology/mecofun.git")
 # Load the mecofun package
 library(mecofun)
 
 ```
 
-## Load koala presences and background points
+## Step 1. Load koala presences and background points
 
+Here, we call our 
 They are loaded as spatvectors, but we also want them as dataframes for model input requirements.
 
 ```{r}
@@ -90,9 +97,9 @@ pr_bg <- rbind(koala_occ_df, background_df)
 ```
 
 
-## Load environmental covariates
+## Step 2. Environmental covariate selection
 
-Loading current covariate rasters. We formatted these rasters in the same way as the Koala data, so that they are all in the same projection and extent. We did this in the script: 'ICCB_Environmental_data.qmd'
+First, we load the rasters describing the current environmental conditions. We formatted these rasters in the same way as the Koala data, so that they are all in the same projection and extent. We did this in the script: 'ICCB_Environmental_data.qmd'
 
 ```{r}
 
@@ -125,29 +132,28 @@ names(covs_current) <- layer_names
 
 ```
 
-## Covariate selection
-
 ### Option 1. Narrow down potential covariates based on ecological knowledge
 
-For this example, we had advice from CSIRO scientists who conducted an expert elicitation to gather a set of potential covariates that are likely to be important for koalas. We use this knowledge to filter out the key bioclim variables.
+For this example, we had advice from scientists at CSIRO (<link>) who conducted an expert elicitation to gather a set of potential covariates that are likely to be important for koalas. This is an example of one approach for deciding what covariates are candidates for inclusion in your model. We use this expert knowledge to filter out the key bioclim variables.
 
-We select the following: Bio5 : Max temp of the warmest month (mainly for the northern populations) Bio6 : Min temp of the coldest month (mainly for southern populations, which essentially excludes alpine regions) Bio12 : Annual Precipitation Bio15 : Precipitation seasonality (coefficient of variation)
+We select the following: 
+
+Bio5 : Max temp of the warmest month (mainly for the northern populations) 
+
+Bio6 : Min temp of the coldest month (mainly for southern populations, which essentially excludes alpine regions) 
+
+Bio12 : Annual Precipitation 
+
+Bio15 : Precipitation seasonality (coefficient of variation).
+
+
+#### Plotting our four covariates from expert elicitation
 
 ```{r}
 
-for(i in 1:nlyr(covs_current)) {
-  terra::plot(covs_current[[i]], main = names(covs_current)[[i]])
-}
-
-```
-
-## Show the four from expert elicitation the layers
-
-```{r}
-
-covs_current_expert <- subset(covs_current, names(covs_current) %in% c("BIO5_Max_Temp_Warmest_Month", 
-                                                                       "BIO6_Min_Temp_Coldest_Month", 
-                                                                       "BIO12_Annual_Precipitation", 
+covs_current_expert <- subset(covs_current, names(covs_current) %in% c("BIO5_Max_Temp_Warmest_Month",
+                                                                       "BIO6_Min_Temp_Coldest_Month",
+                                                                       "BIO12_Annual_Precipitation",
                                                                        "BIO15_Precip_Seasonality"))
 
 for(i in 1:nlyr(covs_current_expert)) {
@@ -156,7 +162,11 @@ for(i in 1:nlyr(covs_current_expert)) {
 
 ```
 
-## Extract environmental covariate values from presence and background locations (training locations)
+## Step 3. Data preparation for modelling
+
+### Extract environmental covariate values from presence and background locations (training locations)
+
+This will create a dataframe where each row is a koala presence or background location and each column is a value for our four bioclimatic variables at that location. 
 
 ```{r}
 
@@ -166,7 +176,7 @@ train_PB_covs <- cbind(train_PB_covs, pr_bg["Presence"])
 # Remove rows where there's values missing from at least one covariate
 print(paste0("RECORDS FROM ", nrow(train_PB_covs) - sum(complete.cases(train_PB_covs)), " ROWS IN TRAINING DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
 
-train_PB_covs <- train_PB_covs[complete.cases(train_PB_covs), ] 
+train_PB_covs <- train_PB_covs[complete.cases(train_PB_covs), ]
 train_PB_covs <- dplyr::select(train_PB_covs, -ID)
 
 head(train_PB_covs)
@@ -190,11 +200,13 @@ train_PB_covs_thinned <- rbind(train_PB_covs_pres_thin, train_PB_covs_bg)
 
 ```
 
-## Check correlation and multicollinearity of covariates
+## Step 4. Check correlation and multicollinearity of covariates
 
-### Correlation plot
+Although we've narrowed down our covariates already based on discussion with experts, there's a chance that our remaining variables might be correlated or collinear. This would cause issues with models, particularly because we're hoping to predict our model into the future. We're going to inspect our covariates for signs of correlation and multicolinearity. 
 
-There are several different methods for creating correlation plots.
+There are several different methods for creating correlation plots which we demonstrate here.
+
+### Correlation plot from the ecospat package
 
 ```{r}
 
@@ -202,26 +214,26 @@ ecospat.cor.plot(covs_current_expert)
 
 ```
 
-### Using the corplots package
+### Functions from the package ENMTools 
 
-For a simple and quick plot.
 
 ```{r}
 
 corplots <- ENMTools::raster.cor.plot(covs_current_expert)
-corplots$cor.mds.plot
 corplots$cor.heatmap
 
 ```
 
-Here, we use the `corrplot` package to create a correlation plot of the selected covariates (this is taken from an EcoCommons Australia notebook).
+### Custom function using `corrplot` package
+
+Here, we use custom code from an EcoCommons Australia notebook that calls the `corrplot` package to create a correlation plot of the selected covariates.
 
 ```{r}
 
 # Select columns by their names
-cor_data <- train_PB_covs[, names(train_PB_covs) %in% c("BIO5_Max_Temp_Warmest_Month", 
-                                                        "BIO6_Min_Temp_Coldest_Month", 
-                                                        "BIO12_Annual_Precipitation", 
+cor_data <- train_PB_covs[, names(train_PB_covs) %in% c("BIO5_Max_Temp_Warmest_Month",
+                                                        "BIO6_Min_Temp_Coldest_Month",
+                                                        "BIO12_Annual_Precipitation",
                                                         "BIO15_Precip_Seasonality")]
 
 # Check the structure of the numeric data
@@ -247,9 +259,13 @@ corrplot(cor_matrix,
 
 ```
 
+Each of these correlation tests gives the same message, we have some correlated covariates. Particularly our Bio6 and Bio12. 
+
+Often a rule of thumb of ~ 0.7 correlation is used to decide what a 'too correlated' covariate pair are (REF). In practice, it's important to think carefully before dropping covariates.  
+
 ### Variance Inflation Factor (VIF)
 
-If you find corrplot is hard for you to make decisions, we can use Variance Inflation Factor (VIF). VIF is another statistical measure used to detect multicollinearity in a set of explanatory (independent) variables in a regression model.
+If you find corrplot is hard for you to use to make decisions, we can also look at the Variance Inflation Factor (VIF). VIF is another statistical measure used to detect multicollinearity in a set of explanatory (independent) variables in a regression model.
 
 **Interpretation:**
 
@@ -260,30 +276,70 @@ If you find corrplot is hard for you to make decisions, we can use Variance Infl
 
 ```{r}
 
-# usdm::vif(covs_current_expert) # just VIF for all covariates
 usdm::vifstep(covs_current_expert) # Variance Inflation Factor and test for multicollinearity
 
 ```
 
-## Exploration of the koala presence and background data
+## Step 5. Exploration of the koala presence and background data
 
-It is good practice to assess where in the environmental space the presence and background points are located. This can help to identify if there are any potential issues with the data, such as a lack of background points in certain areas of environmental space, and should show any patterns in the data that the model should pick up.
+It is good practice to assess where in the environmental space the presence and background points are located. This can help to identify if there are any potential issues with the data, such as a lack of background points in certain areas of environmental space. It's also a good way to have a first look at any patterns in the species data and the environmental covariates.
+
+::: {.panel-tabset group="model"}
+
+## Bio5 Max. temperature warmest month
 
 ```{r}
 
-# Iterate over all of the variables to create density plots of the background and presence data
-for(i in 1:ncol(train_PB_covs_thinned)) {
-  
-  print(ggplot() +
-          geom_density(data = train_PB_covs_thinned, 
-                       aes(x = .data[[names(train_PB_covs_thinned)[i]]], fill = as.factor(Presence)), 
+ggplot() +
+          geom_density(data = train_PB_covs_thinned,
+                       aes(x = .data[["BIO5_Max_Temp_Warmest_Month"]], fill = as.factor(Presence)),
                        alpha = 0.5) +
     theme_bw() +
-    labs(title = names(train_PB_covs_thinned)[i]))
-  
-}
+    labs(title = "BIO5_Max_Temp_Warmest_Month")
 
 ```
+
+## Bio6 Min. temperature coldest month
+
+```{r}
+
+ggplot() +
+          geom_density(data = train_PB_covs_thinned,
+                       aes(x = .data[["BIO6_Min_Temp_Coldest_Month"]], fill = as.factor(Presence)),
+                       alpha = 0.5) +
+    theme_bw() +
+    labs(title = "BIO6_Min_Temp_Coldest_Month")
+
+```
+
+## Bio12 Annual precipitation
+
+```{r}
+
+ggplot() +
+          geom_density(data = train_PB_covs_thinned,
+                       aes(x = .data[["BIO12_Annual_Precipitation"]], fill = as.factor(Presence)),
+                       alpha = 0.5) +
+    theme_bw() +
+    labs(title = "BIO12_Annual_Precipitation")
+
+```
+
+## Bio15 Precipitation seasonality
+
+```{r}
+
+ggplot() +
+          geom_density(data = train_PB_covs_thinned,
+                       aes(x = .data[["BIO15_Precip_Seasonality"]], fill = as.factor(Presence)),
+                       alpha = 0.5) +
+    theme_bw() +
+    labs(title = "BIO15_Precip_Seasonality")
+
+```
+
+:::
+
 
 # First Model: GLM model fitting
 
@@ -316,10 +372,10 @@ summary(null_model)
 
 ```{r}
 
-glm_model_1 <- glm(Presence ~ 
-                     BIO5_Max_Temp_Warmest_Month + 
-                     BIO6_Min_Temp_Coldest_Month + 
-                     BIO12_Annual_Precipitation + 
+glm_model_1 <- glm(Presence ~
+                     BIO5_Max_Temp_Warmest_Month +
+                     BIO6_Min_Temp_Coldest_Month +
+                     BIO12_Annual_Precipitation +
                      BIO15_Precip_Seasonality,
                    data=train_PB_covs_thinned,
                    family = binomial(link = "logit"))
@@ -338,11 +394,11 @@ In this model, we include quadratic terms for the covariates. This is a common a
 
 ```{r}
 
-glm_model_2 <- glm(Presence ~ 
-                     BIO5_Max_Temp_Warmest_Month + I(BIO5_Max_Temp_Warmest_Month^2) + 
-                     BIO6_Min_Temp_Coldest_Month + I(BIO6_Min_Temp_Coldest_Month^2) + 
-                     BIO12_Annual_Precipitation + I(BIO12_Annual_Precipitation^2) + 
-                     BIO15_Precip_Seasonality + I(BIO15_Precip_Seasonality^2), 
+glm_model_2 <- glm(Presence ~
+                     BIO5_Max_Temp_Warmest_Month + I(BIO5_Max_Temp_Warmest_Month^2) +
+                     BIO6_Min_Temp_Coldest_Month + I(BIO6_Min_Temp_Coldest_Month^2) +
+                     BIO12_Annual_Precipitation + I(BIO12_Annual_Precipitation^2) +
+                     BIO15_Precip_Seasonality + I(BIO15_Precip_Seasonality^2),
                    data=train_PB_covs_thinned,
                    family = binomial(link = "logit"))
 
@@ -452,19 +508,19 @@ plot_species_response <- function(glm_model, predictors, data) {
 
     # Generate the response plot
     p <- ggplot() +
-      
-      geom_line(data = plot_data, 
-                aes(x = Predictor_Value, y = Predicted_Probability), 
+
+      geom_line(data = plot_data,
+                aes(x = Predictor_Value, y = Predicted_Probability),
                 color = "#61c6fa", linewidth = 1) +
-      
-      geom_point(data = presence_absence_data[presence_absence_data$Presence_Absence == 1, ], 
-                 aes(x = Predictor_Value, y = Presence_Absence), 
+
+      geom_point(data = presence_absence_data[presence_absence_data$Presence_Absence == 1, ],
+                 aes(x = Predictor_Value, y = Presence_Absence),
                  color = "#11aa96", alpha = 0.6) +
-      
-      geom_point(data = presence_absence_data[presence_absence_data$Presence_Absence == 0, ], 
-                 aes(x = Predictor_Value, y = Presence_Absence), 
+
+      geom_point(data = presence_absence_data[presence_absence_data$Presence_Absence == 0, ],
+                 aes(x = Predictor_Value, y = Presence_Absence),
                  color = "#f6aa70", alpha = 0.6) +
-      
+
       labs(x = predictor, y = NULL) +
       theme_minimal() +
       theme(axis.title.y = element_blank())
@@ -487,9 +543,9 @@ plot_species_response <- function(glm_model, predictors, data) {
 
 ```{r}
 
-predictors <- c("BIO5_Max_Temp_Warmest_Month", 
-                "BIO6_Min_Temp_Coldest_Month", 
-                "BIO12_Annual_Precipitation", 
+predictors <- c("BIO5_Max_Temp_Warmest_Month",
+                "BIO6_Min_Temp_Coldest_Month",
+                "BIO12_Annual_Precipitation",
                 "BIO15_Precip_Seasonality")
 
 plot_species_response(glm_model_1, predictors, train_PB_covs_thinned)
@@ -504,7 +560,7 @@ plot_species_response(glm_model_1, predictors, train_PB_covs_thinned)
 partial_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors], main='GLM')
 
 # Plot inflated response curves:
-inflated_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='GLM') 
+inflated_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='GLM')
 
 ```
 
@@ -516,7 +572,7 @@ inflated_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors], 
 partial_response(glm_model_2, predictors = train_PB_covs_thinned[,predictors], main='GLM')
 
 # Plot inflated response curves:
-inflated_response(glm_model_2, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='GLM') 
+inflated_response(glm_model_2, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='GLM')
 
 ```
 
@@ -618,17 +674,17 @@ sample_size <- c(bgNum)
 ```{r}
 
 # # Specify the model formula - classification
-# model_formula <- as.formula(Presence_Factor ~ 
-#                               BIO5_Max_Temp_Warmest_Month + 
-#                               BIO6_Min_Temp_Coldest_Month + 
-#                               BIO12_Annual_Precipitation + 
+# model_formula <- as.formula(Presence_Factor ~
+#                               BIO5_Max_Temp_Warmest_Month +
+#                               BIO6_Min_Temp_Coldest_Month +
+#                               BIO12_Annual_Precipitation +
 #                               BIO15_Precip_Seasonality)
 
 # Specify the model formula - regression
-model_formula <- as.formula(Presence ~ 
-                              BIO5_Max_Temp_Warmest_Month + 
-                              BIO6_Min_Temp_Coldest_Month + 
-                              BIO12_Annual_Precipitation + 
+model_formula <- as.formula(Presence ~
+                              BIO5_Max_Temp_Warmest_Month +
+                              BIO6_Min_Temp_Coldest_Month +
+                              BIO12_Annual_Precipitation +
                               BIO15_Precip_Seasonality)
 
 ```
@@ -644,7 +700,7 @@ rf_1 <- randomForest::randomForest(formula = model_formula,
                                    weights = weight,
                                    ntree = 1000,
                                    sampsize = sample_size,
-                                   replace = T, 
+                                   replace = T,
                                    importance=TRUE)
 
 ```
@@ -675,7 +731,7 @@ head(getTree(rf_1,1,T))
 partial_response(rf_1, predictors = train_PB_covs_thinned[,predictors], main='Random Forest')
 
 # Plot inflated response curves:
-inflated_response(rf_1, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='Random Forest') 
+inflated_response(rf_1, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='Random Forest')
 
 ```
 
@@ -704,7 +760,7 @@ plot(
 train_PB_covs_thinned_sf <- st_as_sf(train_PB_covs_thinned[, c("x", "y", "Presence")], coords = c("x", "y"), crs = "EPSG:3112")
 
 # Generate spatial blocks
-spblock <- cv_spatial(x = train_PB_covs_thinned_sf, 
+spblock <- cv_spatial(x = train_PB_covs_thinned_sf,
                       column = "Presence",
                       r = NULL,
                       size = 50000, # Size of the blocks in metres
@@ -720,7 +776,7 @@ cv_plot(cv = spblock,
         nrow = 2)
 
 
-# Extract the folds to save 
+# Extract the folds to save
 spfolds <- spblock$folds_list
 
 # We now have a list of 5 folds, where the first object is the training data, and the second is the testing data
@@ -752,36 +808,36 @@ eval_df <- data.frame(fold = numeric(),
                       boyce = numeric())
 
 for(f in seq_along(spfolds)) {
-  
+
   # Subset the training and testing data (spatial cross validation) (for the fth fold)
-  
+
   train_PB_covs_scv <- train_PB_covs_thinned[spfolds[[f]][[1]], ]
   test_PB_covs_scv <- train_PB_covs_thinned[spfolds[[f]][[2]], ]
-  
-  glm_model_1 <- glm(Presence ~ 
-                     BIO5_Max_Temp_Warmest_Month + 
-                     BIO6_Min_Temp_Coldest_Month + 
-                     BIO12_Annual_Precipitation + 
+
+  glm_model_1 <- glm(Presence ~
+                     BIO5_Max_Temp_Warmest_Month +
+                     BIO6_Min_Temp_Coldest_Month +
+                     BIO12_Annual_Precipitation +
                      BIO15_Precip_Seasonality,
                    data=train_PB_covs_scv,
                    family = binomial(link = "logit"))
-  
+
     # Predict to the testing data of fold f
   test_PB_covs_scv$pred <- predict(glm_model_1, newdata = test_PB_covs_scv, type = "response")
 
   # Evaluate prediction on test set
   ROC = precrec::auc(precrec::evalmod(scores = test_PB_covs_scv$pred, labels = test_PB_covs_scv$Presence))[1,4]
- 
-  boyce = ecospat::ecospat.boyce(fit = test_PB_covs_scv$pred, 
-                                 obs = test_PB_covs_scv$pred[which(test_PB_covs_scv$Presence==1)], 
+
+  boyce = ecospat::ecospat.boyce(fit = test_PB_covs_scv$pred,
+                                 obs = test_PB_covs_scv$pred[which(test_PB_covs_scv$Presence==1)],
                                  nclass = 0, # Calculate continuous index
                                  method = "pearson",
                                  PEplot = F)[["cor"]]
-  
+
   # Add results to dataframe
   eval_df <- eval_df %>% add_row(fold = f, ROC = ROC, boyce = boyce)
 
-  
+
 }
 
 ```
@@ -791,7 +847,7 @@ for(f in seq_along(spfolds)) {
 ```{r}
 
 # Mean AUC & boyce
-eval_df %>% 
+eval_df %>%
   summarise(mean_AUC = mean(ROC),
             mean_boyce = mean(boyce),
             sd_AUC = sd(ROC),
@@ -815,45 +871,45 @@ eval_df.RF <- data.frame(fold = numeric(),
                       boyce = numeric())
 
 for(f in seq_along(spfolds)) {
-  
+
   # Subset the training and testing data (spatial cross validation) (for the fth fold)
-  
+
   train_PB_covs_scv <- train_PB_covs_thinned[spfolds[[f]][[1]], ]
   test_PB_covs_scv <- train_PB_covs_thinned[spfolds[[f]][[2]], ]
-  
+
   presNum <- as.numeric(table(train_PB_covs_scv$Presence)["1"]) # number of presences
   bgNum <- as.numeric(table(train_PB_covs_scv$Presence)["0"]) # number of backgrounds
   weight <- ifelse(train_PB_covs_scv$Presence == 1, 1, presNum / bgNum) # down-weighting
-  
+
   sample_size <- c("0" = bgNum, "1" = bgNum)
   sample_size <- c(bgNum)
 
-  
+
   rf_1 <- randomForest::randomForest(formula = model_formula,
                                    data = train_PB_covs_scv,
                                    weights = weight,
                                    ntree = 1000,
                                    sampsize = sample_size,
-                                   replace = T, 
+                                   replace = T,
                                    importance=TRUE)
-  
-  
+
+
     # Predict to the testing data of fold f
   test_PB_covs_scv$pred <- predict(rf_1, newdata = test_PB_covs_scv, type = "response")
 
   # Evaluate prediction on test set
   ROC = precrec::auc(precrec::evalmod(scores = test_PB_covs_scv$pred, labels = test_PB_covs_scv$Presence))[1,4]
- 
-  boyce = ecospat::ecospat.boyce(fit = test_PB_covs_scv$pred, 
-                                 obs = test_PB_covs_scv$pred[which(test_PB_covs_scv$Presence==1)], 
+
+  boyce = ecospat::ecospat.boyce(fit = test_PB_covs_scv$pred,
+                                 obs = test_PB_covs_scv$pred[which(test_PB_covs_scv$Presence==1)],
                                  nclass = 0, # Calculate continuous index
                                  method = "pearson",
                                  PEplot = F)[["cor"]]
-  
+
   # Add results to dataframe
   eval_df.RF <- eval_df.RF %>% add_row(fold = f, ROC = ROC, boyce = boyce)
 
-  
+
 }
 
 ```
@@ -863,7 +919,7 @@ for(f in seq_along(spfolds)) {
 ```{r}
 
 # Mean AUC & boyce
-eval_df.RF %>% 
+eval_df.RF %>%
   summarise(mean_AUC = mean(ROC),
             mean_boyce = mean(boyce),
             sd_AUC = sd(ROC),
@@ -884,9 +940,9 @@ covs_future
 
 covs_future <- terra::mask(covs_future, covs_current) # Crop to SEQ extent
 
-covs_future_expert <- subset(covs_future, names(covs_future) %in% c("BIO5_Max_Temp_Warmest_Month", 
-                                                                    "BIO6_Min_Temp_Coldest_Month", 
-                                                                    "BIO12_Annual_Precipitation", 
+covs_future_expert <- subset(covs_future, names(covs_future) %in% c("BIO5_Max_Temp_Warmest_Month",
+                                                                    "BIO6_Min_Temp_Coldest_Month",
+                                                                    "BIO12_Annual_Precipitation",
                                                                     "BIO15_Precip_Seasonality"))
 
 ```
@@ -909,10 +965,10 @@ plot(covs_future_expert - covs_current_expert)
 
 ```{r}
 
-mess <- predicts::mess(covs_future_expert, 
-                       train_PB_covs_thinned[, c("BIO5_Max_Temp_Warmest_Month", 
-                                            "BIO6_Min_Temp_Coldest_Month", 
-                                            "BIO12_Annual_Precipitation", 
+mess <- predicts::mess(covs_future_expert,
+                       train_PB_covs_thinned[, c("BIO5_Max_Temp_Warmest_Month",
+                                            "BIO6_Min_Temp_Coldest_Month",
+                                            "BIO12_Annual_Precipitation",
                                             "BIO15_Precip_Seasonality")])
 
 plot(mess, axes = F)
@@ -930,7 +986,7 @@ analog_fut <- predicted_raster_model_1
 
 values(analog_fut)[values(mess)<0] <- NA
 
-plot(analog_fut, 
+plot(analog_fut,
      range = c(0, 1),  # Set min and max values for the color scale
      main = "Koala relative occurrence in regions with analogue conditions")
 
@@ -938,7 +994,7 @@ novel_fut <- predicted_raster_model_1
 
 values(novel_fut)[values(mess)>0] <- NA
 
-plot(novel_fut, 
+plot(novel_fut,
      range = c(0, 1),  # Set min and max values for the color scale
      main = "Koala relative occurrence in regions with novel conditions")
 
@@ -999,7 +1055,7 @@ plot(
 
 ## Presenting predictions with uncertainty
 
-There are many sources of model uncertainty that should be explored and ideally, presented alongside model predictions. 
+There are many sources of model uncertainty that should be explored and ideally, presented alongside model predictions.
 
 One that we'll focus on here is climate scenario uncertainty. We do so by fitting a second model to future climate data from a lower emission shared socioeconomic path scenario (SSP 1.26).
 
@@ -1012,9 +1068,9 @@ covs_future_SSP126 <- rast("Data/Environmental_variables/future_bioclim.2090.SSP
 names(covs_future_SSP126) <- layer_names
 covs_future_SSP126
 
-covs_future_SSP126_expert <- subset(covs_future_SSP126, names(covs_future_SSP126) %in% c("BIO5_Max_Temp_Warmest_Month", 
-                                                                                          "BIO6_Min_Temp_Coldest_Month", 
-                                                                                          "BIO12_Annual_Precipitation", 
+covs_future_SSP126_expert <- subset(covs_future_SSP126, names(covs_future_SSP126) %in% c("BIO5_Max_Temp_Warmest_Month",
+                                                                                          "BIO6_Min_Temp_Coldest_Month",
+                                                                                          "BIO12_Annual_Precipitation",
                                                                                           "BIO15_Precip_Seasonality"))
 
 ```
@@ -1106,7 +1162,7 @@ names(upper_ci_r) <- "upper_CI"
 
 prediction_w_uncertainty <- c(predicted_r, lower_ci_r, upper_ci_r)
 
-plot(prediction_w_uncertainty, range = c(0, 1))  
+plot(prediction_w_uncertainty, range = c(0, 1))
 
 ```
 
