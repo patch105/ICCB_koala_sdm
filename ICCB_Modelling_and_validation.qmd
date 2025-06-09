@@ -26,16 +26,20 @@ editor:
   source
 abstract: |
   In this script we are fitting species distribution models to the data of koalas (Phascolarctos cinereus) in the South-East Queensland (SEQ) region under current environmental conditions, which we will predict into future environmental conditions. Our modelling protocol follows these steps:
-  1. 
-  2.
-  3.
-  
-  We wrote this script drawing on some of the following resources:
-
-- Ecocommons Notebooks <https://www.ecocommons.org.au/notebooks/>
-- Damaris Zurell's SDM Intro <https://damariszurell.github.io/SDM-Intro/>
-
+  1. Load the koala presence data and environmental covariates.
+  2. Sample background points. 
+  3. Select environmental covariates based on expert knowledge and correlation analysis.
+  6. Fit a Generalised Linear Model (GLM) to the data based on current climatic conditions.
+  7. Fit a Random Forest Model to the data based on current climatic conditions.
+  7. Evaluate the model performance with spatial block cross validation. 
+  8. Predict the model into future environmental conditions.
+  9. Summarise model uncertainty. 
 ---
+
+We wrote this script drawing on some of the following resources:
+
+-   Ecocommons Notebooks <https://www.ecocommons.org.au/notebooks/>
+-   Damaris Zurell's SDM Intro <https://damariszurell.github.io/SDM-Intro/>
 
 ## Import packages
 
@@ -47,6 +51,7 @@ abstract: |
 library(dplyr)
 library(purrr) # do we use this?
 library(ggplot2)
+library(tidyr)
 
 # for downloading species data
 library(galah)
@@ -74,242 +79,32 @@ library(mecofun)
 
 ## Load South East Queensland (SEQ) boundary
 
-We start by defining our study area, which is the South East Queensland (SEQ) region. We will use the Local Government Areas (LGA) shapefile to define the extent of SEQ.
+We start by defining our study area, which is the South East Queensland (SEQ) region. In a previous session we used the Local Government Areas (LGA) shapefile to define the extent of SEQ.
 
-https://qldspatial.information.qld.gov.au/catalogue/custom/detail.page?fid={3F3DBD69-647B-4833-B0A5-CC43D5E70699}
+What we'll load is a polygon of our boundary which becomes our model domain.
 
-```{r}
-
-# Load the study area shapefile
-LGA <- st_read("Data/Environmental_variables/Local_Government_Areas.shp")
-
-# Check the coordinate reference system (CRS)
-st_crs(LGA)
-
-# Convert to WGS84
-LGA <- LGA %>% st_transform(3112)
-
-# Select local govt. areas for South East Queensland
-LGA_SEQ <- LGA %>% 
-  filter(lga %in% c("Brisbane City", 
-                    "Moreton Bay City", 
-                    "Logan City", 
-                    "Ipswich City", 
-                    "Redland City", 
-                    "Scenic Rim Regional", 
-                    "Somerset Regional", 
-                    "Lockyer Valley Regional", 
-                    "Gold Coast City", 
-                    "Sunshine Coast Regional", 
-                    "Toowoomba Regional", 
-                    "Noosa Shire"))
-
-ggplot() +
-  geom_sf(data = LGA, color = "black") +
-  geom_sf(data = LGA_SEQ, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
-  theme_minimal() +
-  theme(legend.position = "none") +
-  labs(title = "Local Government Areas Queensland (SEQ in purple)")
-  
-
-ggplot() +
-  geom_sf(data = LGA_SEQ, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
-  theme_minimal() +
-  theme(legend.position = "none") +
-  labs(title = "Local Government Areas South East Queensland (SEQ)")
-
-```
-
-## Merge into a single polygon
+For our coordinate reference system throughout, we'll be using GDA2020 / MGA zone 56, which is identified by the EPSG code 7856.
 
 ```{r}
 
-# Merge the SEQ LGAs into one polygon
-SEQ_extent <- st_union(LGA_SEQ)
+SEQ_extent.vect <- vect("Data/Environmental_variables/seq_boundary.gpkg")
 
-ggplot() +
-  geom_sf(data = SEQ_extent, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
-  theme_minimal() +
-  theme(legend.position = "none") +
-  ggtitle("South-East Queensland Spatial Extent") + 
-  theme_bw() 
+# Define an sf object as well (used later)
+SEQ_extent <- st_as_sf(SEQ_extent.vect, 
+                        coords = c("x", "y"), 
+                        crs = 7856)
 
+plot(SEQ_extent.vect)
+                        
 ```
 
-## Save SEQ extent for other scripts
+# Step 1. Load the koala presence data and environmental covariates.
 
-```{r}
+First, we're going to get some koala occurrence data. We will use the `galah` package to access the Atlas of Living Australia (ALA) data. The ALA is a great resource for Australian biodiversity data, and the `galah` package provides a convenient interface to access it.
 
-# Convert our SEQ extent to a SpatExtent object by converting to a SpatVector
-SEQ_extent.vect <- terra::vect(SEQ_extent)
+We won't have time to explore these, but there are plenty of options for those using data outside of Australia. For example, the `rgbif` package provides access to the Global Biodiversity Information Facility (GBIF) data, and the `spocc` package provides access to a range of biodiversity data sources.
 
-writeVector(SEQ_extent.vect, "Data/Environmental_variables/SEQ_extent.shp", overwrite = T)
-
-```
-
-## Load current environmental data
-
-Layers were made available to us by the EcoCommons team and were created by Toombs and Ma (2025):
-
-Toombs, N., and Ma S., 2025, A High-Resolution Dataset of 19 Bioclimatic Indices over Australia, Climate Projections and Services – Queensland Treasury, Brisbane, Queensland. [https://longpaddock.qld.gov.au/qld-future-climate/data-info/tern/]
-
-
-```{r}
-
-files <- list.files("Data/Environmental_variables/Current_climate_QLD", 
-             pattern = ".tif$", 
-             full.names = TRUE)
-
-# Load all bioclim rasters
-current_bioclim <- lapply(files, terra::rast) 
-
-# Make into one raster stack
-current_bioclim <- rast(current_bioclim)
-
-plot(current_bioclim)
-
-# Examine the resolution
-current_bioclim
-
-# Check the CRS
-crs(current_bioclim)
-
-# Update CRS 
-current_bioclim <- terra::project(current_bioclim, "EPSG:3112")
-
-# Our resolution is now ~5km by 5km
-current_bioclim
-
-```
-
-## Mask to SEQ extent
-
-```{r}
-
-current_bioclim <- terra::mask(current_bioclim, SEQ_extent.vect)
-
-# You can see that this has masked the area but the extent is still the same
-plot(current_bioclim[[1]])
-
-current_bioclim <- terra::crop(current_bioclim, SEQ_extent.vect)
-
-plot(current_bioclim)
-
-# Save the current environmental covariates
-writeRaster(current_bioclim, 
-            filename = "Data/Environmental_variables/current_bioclim.tif",
-            overwrite = T)
-
-```
-
-## Load future environmental data
-
-Here we load outputs from a moderate-high emissions shared socio-economic path scenario (SSP 3.70) for the year 2090 (2080 - 2099).
-
-```{r}
-
-files <- list.files("Data/Environmental_variables/Future_climate_SSP370_2090", 
-             pattern = ".tif$", 
-             full.names = TRUE)
-
-# Load all bioclim rasters
-future_bioclim <- lapply(files, terra::rast) 
-
-# Make into one raster stack
-future_bioclim <- rast(future_bioclim)
-
-plot(future_bioclim)
-
-# Examine the resolution
-future_bioclim
-
-# Check the CRS
-crs(future_bioclim)
-
-# Update CRS 
-future_bioclim <- terra::project(future_bioclim, "EPSG:3112")
-
-# Our resolution is now ~5km by 5km
-future_bioclim
-
-```
-
-## Mask to SEQ extent
-
-```{r}
-
-future_bioclim <- terra::subst(from = 0, to = NA, future_bioclim) # Set all values of 0 to NA
-
-future_bioclim <- terra::mask(future_bioclim, SEQ_extent.vect)
-
-# You can see that this has masked the area but the extent is still the same
-plot(future_bioclim[[1]])
-
-future_bioclim <- terra::crop(future_bioclim, SEQ_extent.vect)
-
-plot(future_bioclim[[1]])
-
-# Save the future environmental covariates
-writeRaster(future_bioclim, 
-            filename = "Data/Environmental_variables/future_bioclim.2090.SSP370.tif",
-            overwrite = T)
-
-```
-
-## Load future environmental data 2
-
-Here we load outputs from a low emissions shared socio-economic path scenario (SSP 1.26) for the year 2090 (2080 - 2099).
-
-```{r}
-
-files <- list.files("Data/Environmental_variables/Future_climate_SSP126_2090", 
-             pattern = ".tif$", 
-             full.names = TRUE)
-
-# Load all bioclim rasters
-future_bioclim <- lapply(files, terra::rast) 
-
-# Make into one raster stack
-future_bioclim <- rast(future_bioclim)
-
-plot(future_bioclim)
-
-# Examine the resolution
-future_bioclim
-
-# Check the CRS
-crs(future_bioclim)
-
-# Update CRS 
-future_bioclim <- terra::project(future_bioclim, "EPSG:3112")
-
-# Our resolution is now ~5km by 5km
-future_bioclim
-
-```
-## Mask to SEQ extent
-
-```{r}
-
-future_bioclim <- terra::subst(from = 0, to = NA, future_bioclim) # Set all values of 0 to NA
-
-future_bioclim <- terra::mask(future_bioclim, SEQ_extent.vect)
-
-# You can see that this has masked the area but the extent is still the same
-plot(future_bioclim[[1]])
-
-future_bioclim <- terra::crop(future_bioclim, SEQ_extent.vect)
-
-plot(future_bioclim)
-
-# Save the future environmental covariates
-writeRaster(future_bioclim, 
-            filename = "Data/Environmental_variables/future_bioclim.2090.SSP126.tif",
-            overwrite = T)
-
-```
-
-## To cite the `galah` package
+### To cite the `galah` package
 
 ```{r}
 
@@ -318,49 +113,7 @@ citation(package = "galah")
 
 ```
 
-## Load South East Queensland (SEQ) boundary
-
-We made this boundary in the 'ICCB_Environmental_data.qmd' script. 
-Also load local government area polygons (LGAs) just for plotting.
-
-```{r}
-
-SEQ_extent.vect <- vect("Data/Environmental_variables/SEQ_extent.shp")
-
-# Define an sf object as well
-SEQ_extent <- st_as_sf(SEQ_extent.vect, 
-                        coords = c("x", "y"), 
-                        crs = 3112)
-                        
-
-
-# Load the study area shapefile
-LGA <- st_read("Data/Environmental_variables/Local_Government_Areas.shp")
-
-# Check the coordinate reference system (CRS)
-st_crs(LGA)
-
-# Convert to WGS84
-LGA <- LGA %>% st_transform(3112)
-
-# Select local govt. areas for South East Queensland
-LGA_SEQ <- LGA %>% 
-  filter(lga %in% c("Brisbane City", 
-                    "Moreton Bay City", 
-                    "Logan City", 
-                    "Ipswich City", 
-                    "Redland City", 
-                    "Scenic Rim Regional", 
-                    "Somerset Regional", 
-                    "Lockyer Valley Regional", 
-                    "Gold Coast City", 
-                    "Sunshine Coast Regional", 
-                    "Toowoomba Regional", 
-                    "Noosa Shire"))
-
-```
-
-## Atlas of Living Australia using "galah" package
+### Atlas of Living Australia using "galah" package
 
 To access records from the ALA, you will need to be registered.
 
@@ -368,7 +121,9 @@ There are two registration options:
 
 1.  If you are affiliated with an Australian institution, you should be able to register for ALA through your institution. Find your institution in the list of institutions when you select 'Login' [on the ALA website](https://www.ala.org.au/). Follow the prompts to enter your institution email and password. If your institution is not listed, you will need to register for an ALA account.
 
-2. If you are not affiliated with an Australian institution, you will need to register for an ALA account. You can do this by selecting 'Register' [on the ALA website](https://www.ala.org.au/). Follow the prompts to enter your email and password.
+2.  If you are not affiliated with an Australian institution, you will need to register for an ALA account. You can do this by selecting 'Register' [on the ALA website](https://www.ala.org.au/). Follow the prompts to enter your email and password.
+
+Once you're registered, you can set up your galah access configuration. This is a one-time setup that allows you to access the ALA data through the `galah` package. For now, we'll just use Scott's email address, but you should use your own email address once you've registered for an ALA account.
 
 ```{r}
 
@@ -380,9 +135,9 @@ galah_config(atlas = "ALA",
 
 ```
 
-## Download koala data from ALA
+### Download koala data from ALA
 
-Usually you would check that the CRS for the occurrences is the same as the shapefile. However, we know that the `galah' package operates in WGS84.
+We're using a species name call with a state filter to identify all Presence-Only occurrence records of koala for Queensland.
 
 ```{r}
 
@@ -394,24 +149,26 @@ koala_occurrences <- galah_call() %>%
   ) %>% 
   atlas_occurrences()
 
+
 ```
-## Clean koala data
+
+This download takes a minute or so, and we end up with a dataframe of 93456 records of koala!
 
 ```{r}
 
-# Create a map using ggplot2
-ggplot() +
-  geom_sf(data = LGA, color = "black") +
-  geom_point(data = koala_occurrences,
-             aes(x = decimalLongitude,
-                 y = decimalLatitude),
-             color = "blue", size = 0.5) + # Add points for occurrences
-  ggtitle("Koala occurrences across Queensland") +             # Add title
-  theme_bw()
+nrow(koala_occurrences)
+names(koala_occurrences)
 
 ```
 
-## Filter by SEQ region
+### Cleaning koala data
+
+Not all data are created equal, and it's always important to spend some time examining and cleaning your species occurrence data before using it in a model. This is particularly relevant for us because we're using records collated into a database from a bunch of different sources. We don't have time to explore this today, but here's a few examples of things you might check at this stage and some functions / packages available to help:
+
+-   When downloading data from the ALA or directly from GBIF, you can filter for specific fields. For example, you can filter for records with a specific coordinate precision or quality, or remove those records older than a certain date. You can use the `galah_filter()` function for this.
+-   Check for duplicates in the data. You can use the `dplyr` package with functions like `distinct()`.
+-   Common issues like spatial outliers, taxonomic errors or coordinate errors are tested for with packages like: `spocc`, `CoordinateCleaner`, and `bdc`.
+-   Usually you would check that the CRS for the occurrences is the same as the shapefile. However, we know that the \`galah' package operates in WGS84.
 
 ```{r}
 
@@ -420,23 +177,51 @@ paste0("Number of NAs in 'longitude' ", sum(is.na(koala_occurrences$decimalLongi
 paste0("Number of NAs in 'latitude' ", sum(is.na(koala_occurrences$decimalLatitude)))
 
 koala_occ_sf <- koala_occurrences %>% 
-  drop_na(decimalLongitude, decimalLatitude) %>% # remove NA values
+  tidyr::drop_na(decimalLongitude, decimalLatitude) %>% # remove NA values
   st_as_sf(coords = c("decimalLongitude", "decimalLatitude"), 
            crs = 4326) %>%
-  st_transform(3112) %>% # Transform to the same CRS as SEQ_extent
+  st_transform(7856) # Transform to the same CRS as SEQ_extent
+
+```
+
+### Plot the koala data across Queensland
+
+```{r}
+
+# Load a shapefile for Queensland just for plotting
+qld_shp = st_read('Data/Environmental_variables/QLD_State_Mask.shp') %>% 
+  st_transform(7856) # Transform to the same CRS as SEQ_extent
+  
+
+# Create a map using ggplot2
+ggplot() +
+  geom_sf(data = qld_shp, color = "black") +
+  geom_sf(data = koala_occ_sf,
+             color = "blue", size = 0.5) + # Add points for occurrences
+  ggtitle("Koala occurrences across Queensland") +             # Add title
+  theme_bw()
+
+```
+
+### Filter by SEQ region
+
+This takes a minute or two.
+
+```{r}
+
+koala_occ_sf <- koala_occ_sf %>% 
   st_intersection(SEQ_extent) %>% # Mask to extent
   distinct() # drop any duplicated records
 
 
 ```
 
-## Plot the filtered data
+### Plot the filtered koala data
 
 ```{r}
 
-# Create a map using ggplot2
 ggplot() +
-  geom_sf(data = SEQ_extent.vect, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
+  geom_sf(data = SEQ_extent, fill = "purple3", alpha = 0.5, color = "black", size = 0.2) +
   geom_sf(data = koala_occ_sf,                           # Add koala presence locations
           aes(geometry = geometry),
              color = "blue", size = 0.5) +               # Add points for occurrences
@@ -445,9 +230,11 @@ ggplot() +
 
 ```
 
-# Sample background points
+# Step 2. Sample background points
 
-We need to load the environmental covariate grid to use as our template grid for creating background points. We generated the environmental covariates in the 'ICCB_Environmental_data.qmd' script. 
+Choosing background points to sample the availability of different environmental conditions is an important step in presence-only modelling.
+
+We need to load the environmental covariate grid to use as our template grid for creating background points. We generated the environmental covariates in the 'ICCB_Environmental_data.qmd' script.
 
 ```{r}
 
@@ -472,7 +259,7 @@ background <- predicts::backgroundSample(mask = domain,
                                          n = 2500)
 
 # Convert to terra SpatVector object
-background <- terra::vect(background, crs = "EPSG:3112")
+background <- terra::vect(background[,1:2], crs = "EPSG:7856")
 
 # Convert background points (SpatVector) to data frame
 background_df <- as.data.frame(geom(background))
@@ -493,8 +280,9 @@ ggplot() +
 
 ```
 
-## Save koala presences and background points 
-This ensures quick upload in the future and that these records can be used among models. 
+## Save koala presences and background points
+
+This ensures quick upload in the future and that these records can be used among models.
 
 ```{r}
 
@@ -506,8 +294,7 @@ writeVector(background, "Data/Biological_records/background_points_2.5k_random.s
 
 ## Step 1. Load koala presences and background points
 
-Here, we call our 
-They are loaded as spatvectors, but we also want them as dataframes for model input requirements.
+Here, we call our They are loaded as spatvectors, but we also want them as dataframes for model input requirements.
 
 ```{r}
 
@@ -533,7 +320,6 @@ head(background_df)
 pr_bg <- rbind(koala_occ_df, background_df)
 
 ```
-
 
 ## Step 2. Environmental covariate selection
 
@@ -574,16 +360,15 @@ names(covs_current) <- layer_names
 
 For this example, we had advice from scientists at CSIRO (<link>) who conducted an expert elicitation to gather a set of potential covariates that are likely to be important for koalas. This is an example of one approach for deciding what covariates are candidates for inclusion in your model. We use this expert knowledge to filter out the key bioclim variables.
 
-We select the following: 
+We select the following:
 
-Bio5 : Max temp of the warmest month (mainly for the northern populations) 
+Bio5 : Max temp of the warmest month (mainly for the northern populations)
 
-Bio6 : Min temp of the coldest month (mainly for southern populations, which essentially excludes alpine regions) 
+Bio6 : Min temp of the coldest month (mainly for southern populations, which essentially excludes alpine regions)
 
-Bio12 : Annual Precipitation 
+Bio12 : Annual Precipitation
 
 Bio15 : Precipitation seasonality (coefficient of variation).
-
 
 #### Plotting our four covariates from expert elicitation
 
@@ -604,7 +389,7 @@ for(i in 1:nlyr(covs_current_expert)) {
 
 ### Extract environmental covariate values from presence and background locations (training locations)
 
-This will create a dataframe where each row is a koala presence or background location and each column is a value for our four bioclimatic variables at that location. 
+This will create a dataframe where each row is a koala presence or background location and each column is a value for our four bioclimatic variables at that location.
 
 ```{r}
 
@@ -640,9 +425,9 @@ train_PB_covs_thinned <- rbind(train_PB_covs_pres_thin, train_PB_covs_bg)
 
 ## Step 4. Check correlation and multicollinearity of covariates
 
-Although we've narrowed down our covariates already based on discussion with experts, there's a chance that our remaining variables might be correlated or collinear. This would cause issues with models, particularly because we're hoping to predict our model into the future. We're going to inspect our covariates for signs of correlation and multicolinearity. 
+Although we've narrowed down our covariates already based on discussion with experts, there's a chance that our remaining variables might be correlated or collinear. This would cause issues with models, particularly because we're hoping to predict our model into the future. We're going to inspect our covariates for signs of correlation and multicolinearity.
 
-There are several different methods for creating correlation plots which we demonstrate here.
+There are several different methods for creating correlation plots, we just show two.
 
 ### Correlation plot from the ecospat package
 
@@ -652,54 +437,9 @@ ecospat.cor.plot(covs_current_expert)
 
 ```
 
-### Functions from the package ENMTools 
+What the correlation test plot suggests is that we have some correlated covariates. Particularly our Bio6 and Bio12.
 
-
-```{r}
-
-corplots <- ENMTools::raster.cor.plot(covs_current_expert)
-corplots$cor.heatmap
-
-```
-
-### Custom function using `corrplot` package
-
-Here, we use custom code from an EcoCommons Australia notebook that calls the `corrplot` package to create a correlation plot of the selected covariates.
-
-```{r}
-
-# Select columns by their names
-cor_data <- train_PB_covs[, names(train_PB_covs) %in% c("BIO5_Max_Temp_Warmest_Month",
-                                                        "BIO6_Min_Temp_Coldest_Month",
-                                                        "BIO12_Annual_Precipitation",
-                                                        "BIO15_Precip_Seasonality")]
-
-# Check the structure of the numeric data
-str(cor_data)
-
-# Calculate the correlation matrix for the numeric columns
-cor_matrix <- cor(cor_data, use = "complete.obs", method = "pearson")
-
-
-corrplot(cor_matrix,
-         method = "color",            # Use colored squares for correlation
-         type = "upper",              # Show upper triangle only
-         order = "hclust",            # Reorder variables hierarchically
-         addCoef.col = "black",       # Show correlation coefficients in black
-         number.cex = 0.5,            # Reduce the size of correlation labels
-         tl.col = "black",            # Text label color
-         tl.srt = 30,                 # Rotate labels slightly for readability
-         tl.cex = 0.5,                # Reduce text size of variable labels (set smaller valu)
-         cl.cex = 0.8,                # Reduce text size of color legend
-         diag = FALSE,                # Hide diagonal
-         col = colorRampPalette(c("#11aa96", "#61c6fa", "#f6aa70"))(200),
-         sig.level = 0.01, insig = "blank")
-
-```
-
-Each of these correlation tests gives the same message, we have some correlated covariates. Particularly our Bio6 and Bio12. 
-
-Often a rule of thumb of ~ 0.7 correlation is used to decide what a 'too correlated' covariate pair are (REF). In practice, it's important to think carefully before dropping covariates.  
+Often a rule of thumb of \~ 0.7 correlation is used to decide what a 'too correlated' covariate pair are (REF). In practice, it's important to think carefully before dropping covariates.
 
 ### Variance Inflation Factor (VIF)
 
@@ -723,7 +463,6 @@ usdm::vifstep(covs_current_expert) # Variance Inflation Factor and test for mult
 It is good practice to assess where in the environmental space the presence and background points are located. This can help to identify if there are any potential issues with the data, such as a lack of background points in certain areas of environmental space. It's also a good way to have a first look at any patterns in the species data and the environmental covariates.
 
 ::: {.panel-tabset group="model"}
-
 ## Bio5 Max. temperature warmest month
 
 ```{r}
@@ -775,9 +514,7 @@ ggplot() +
     labs(title = "BIO15_Precip_Seasonality")
 
 ```
-
 :::
-
 
 # First Model: GLM model fitting
 
@@ -1048,7 +785,6 @@ plot(
 
 ```
 
-
 # Random forest
 
 ```{r}
@@ -1066,10 +802,13 @@ dir.create("Outputs/RF_outputs", showWarnings = F)
 <!-- ```{r} -->
 
 <!-- # Scale the covariates -->
+
 <!-- train_PB_covs_thinned_scaled <- scale(train_PB_covs_thinned[, layer_names], center = T, scale = T)  -->
 
 <!-- # Combine with the rest of the dataframe -->
+
 <!-- train_PB_covs_scaled <- data.frame(train_PB_covs_thinned[, c("x", "y", "Presence")], -->
+
 <!--                                    train_PB_covs_thinned_scaled) -->
 
 <!-- head(train_PB_covs_scaled) -->
@@ -1189,13 +928,12 @@ plot(
 
 ```
 
-
 # Model evaluation with spatial block cross-validation
 
 ```{r}
 
 # Convert training data to sf
-train_PB_covs_thinned_sf <- st_as_sf(train_PB_covs_thinned[, c("x", "y", "Presence")], coords = c("x", "y"), crs = "EPSG:3112")
+train_PB_covs_thinned_sf <- st_as_sf(train_PB_covs_thinned[, c("x", "y", "Presence")], coords = c("x", "y"), crs = "EPSG:7856")
 
 # Generate spatial blocks
 spblock <- cv_spatial(x = train_PB_covs_thinned_sf,
@@ -1297,7 +1035,6 @@ eval_df %>%
 # Model evaluation for Random Forest with spatial block cross-validation
 
 We're going to use the same spatial folds as before.
-
 
 ## Run the RF model for every fold and evaluate
 
@@ -1438,7 +1175,6 @@ plot(novel_fut,
 
 ```
 
-
 # GLM future predictions
 
 ## Model 1
@@ -1497,7 +1233,6 @@ There are many sources of model uncertainty that should be explored and ideally,
 
 One that we'll focus on here is climate scenario uncertainty. We do so by fitting a second model to future climate data from a lower emission shared socioeconomic path scenario (SSP 1.26).
 
-
 ## Load future environmental data (SSP 1.26)
 
 ```{r}
@@ -1549,7 +1284,6 @@ plot(
 ## Model uncertainty
 
 Another element of uncertainty that can be represented is model uncertainty, or the standard error around the coefficient estimates.
-
 
 ```{r}
 
@@ -1603,5 +1337,3 @@ prediction_w_uncertainty <- c(predicted_r, lower_ci_r, upper_ci_r)
 plot(prediction_w_uncertainty, range = c(0, 1))
 
 ```
-
-
