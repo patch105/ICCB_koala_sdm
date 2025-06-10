@@ -22,15 +22,15 @@ format:
     geometry: 
       - top=30mm
       - left=30mm
-editor: source
+editor:
+  source
 abstract: |
   In this script we are fitting species distribution models to the data of koalas (Phascolarctos cinereus) in the South-East Queensland (SEQ) region under current environmental conditions, which we will predict into future environmental conditions. Our modelling protocol follows these steps:
   1. Load the koala presence data and environmental covariates.
   2. Sample background points. 
   3. Select environmental covariates based on expert knowledge and correlation analysis.
-  4. Exploration of the koala presence and background data.
-  5. Fit a Generalised Linear Model (GLM) to the data based on current climatic conditions.
-  6. Fit a Random Forest Model to the data based on current climatic conditions.
+  6. Fit a Generalised Linear Model (GLM) to the data based on current climatic conditions.
+  7. Fit a Random Forest Model to the data based on current climatic conditions.
   7. Evaluate the model performance with spatial block cross validation. 
   8. Predict the model into future environmental conditions.
   9. Summarise model uncertainty. 
@@ -52,6 +52,7 @@ library(dplyr)
 library(purrr) # do we use this?
 library(ggplot2)
 library(tidyr)
+library(tidyterra)
 
 # for downloading species data
 library(galah)
@@ -59,7 +60,6 @@ library(galah)
 # for general spatial operations
 library(terra)
 library(sf)
-library(tidyterra)
 
 # for SDM analyses
 library(predicts)
@@ -69,7 +69,6 @@ library(usdm)
 library(randomForest)
 library(precrec)
 library(corrplot)
-library(flexsdm)
 
 # Install the mecofun package, used in the materials at https://damariszurell.github.io/SDM-Intro/
 library(devtools)
@@ -234,47 +233,28 @@ ggplot() +
 
 # Step 2. Sample background points
 
-Choosing background points to sample the availability of different environmental conditions is an important step in presence-only modelling. These points are contrasted against environmental conditions where your species was found (the presences) to help the model learn what conditions are suitable for the species. Background selection is a critical step in presence-only SDMs. Choices reflect your understanding of your study species. There's lots of good discussion about approaches to background selection in the literature, and we recommend reading some of these papers to understand the implications of your choices.
+Choosing background points to sample the availability of different environmental conditions is an important step in presence-only modelling.
 
-For this tutorial, we will use random sampling of background points across the SEQ region to keep it simple.
-
-A few other approaches include:
-
--   **Buffering**: Create a buffer around the presence points and sample points within that buffer. Figure from [Velazco et al.](https://sjevelazco.github.io/flexsdm/articles/v01_pre_modeling.html#background-and-pseudo-absence-sampling).
-
-```{r}
-#| echo: false
-
-knitr::include_graphics("Figures/Buffered_Background.png")
-```
-
--   **Minimum convex hull**: Create a minimum convex hull around the presence points and sample points within that hull. Figure from [Velazco et al.](https://sjevelazco.github.io/flexsdm/articles/v01_pre_modeling.html#background-and-pseudo-absence-sampling).
-
-```{r}
-#| echo: false
-
-knitr::include_graphics("Figures/Minimum_convex_polygon_Background.png")
-```
-
-## Random background sampling
-
-We need to load a template grid for creating background points. This matches the grid our covariates are on, which we'll load soon.
-
-We're using a function from the `predicts` package for this.
+We need to load the environmental covariate grid to use as our template grid for creating background points. We generated the environmental covariates in the 'ICCB_Environmental_data.qmd' script.
 
 ```{r}
 
-domain <- rast("Data/Environmental_variables/SEQ_current_bioclim.tif")
+covs <- rast("Data/Environmental_variables/SEQ_current_bioclim.tif")
 
 # Make a blank raster of all 1s of the same dimensions as our covariate grid
-domain <- domain[[1]]
-domain <- ifel(is.na(domain), NA, 1) # Set all values to 1 except for NA values (which are outside the SEQ extent
+domain <- covs[[1]]
+values(domain) <- 1
+
+
+# Mask extent by SEQ boundary
+domain <- terra::mask(domain, SEQ_extent.vect, updatevalue = NA)
 
 names(domain) <- "SEQ_extent"
 
 plot(domain)
 
 # Set the location and number of background points
+# Random sampling at first
 # The mask means that any NA (not SEQ) locations do not include background points
 background <- predicts::backgroundSample(mask = domain, 
                                          n = 2500)
@@ -301,18 +281,34 @@ ggplot() +
 
 ```
 
-### Combine koala presence and background points as dataframes
+## Save koala presences and background points
+
+This ensures quick upload in the future and that these records can be used among models.
 
 ```{r}
 
+writeVector(koala_occ.vect, "Data/Biological_records/SEQ_koala_occurrences.shp", overwrite = T)
+writeVector(background, "Data/Biological_records/background_points_2.5k_random.shp", overwrite = T)
+
+```
+
+## Step 1. Load koala presences and background points
+
+Here, we call our They are loaded as spatvectors, but we also want them as dataframes for model input requirements.
+
+```{r}
+
+koala_occ <- vect("Data/Biological_records/SEQ_koala_occurrences.shp")
+background <- vect("Data/Biological_records/background_points_2.5k_random.shp")
+
+crs(koala_occ)
+
 # Make a dataframe of just x, y and presence
-koala_occ_df <- koala_occ_sf %>%
-  dplyr::mutate(x = sf::st_coordinates(.)[,1],
-                y = sf::st_coordinates(.)[,2]) %>%
-				st_drop_geometry() %>% 
+koala_occ_df <- koala_occ %>% 
+  as.data.frame(geom = "XY") %>% 
   dplyr::select(x,y) %>% 
   mutate(Presence = 1)
-  
+
 head(koala_occ_df)
 
 background_df <- background %>% 
@@ -327,13 +323,9 @@ pr_bg <- rbind(koala_occ_df, background_df)
 
 ```
 
-# Step 3. Environmental covariate selection
+## Step 2. Environmental covariate selection
 
-First, we load the rasters describing the current environmental conditions. We did some pre-formatting of these rasters so they match the koala data in projection and extent.
-
-Layers were made available to us by the EcoCommons team and were created by Toombs and Ma (2025):
-
-Toombs, N., and Ma S., 2025, A High-Resolution Dataset of 19 Bioclimatic Indices over Australia, Climate Projections and Services – Queensland Treasury, Brisbane, Queensland. \[https://longpaddock.qld.gov.au/qld-future-climate/data-info/tern/\]
+First, we load the rasters describing the current environmental conditions. We formatted these rasters in the same way as the Koala data, so that they are all in the same projection and extent. We did this in the script: 'ICCB_Environmental_data.qmd'
 
 ```{r}
 
@@ -364,9 +356,29 @@ layer_names <- c(
 
 names(covs_current) <- layer_names
 
+covs_current <- crop(covs_current, SEQ_extent.vect) # Mask to SEQ extent
+covs_current <- mask(covs_current, SEQ_extent.vect) # Mask to SEQ extent
+
 ```
 
-### One approach: Narrow down potential covariates based on ecological knowledge
+## Add human footprint layer
+
+```{r}
+
+human_footprint <- rast("Data/Environmental_variables/cost_hfp2013.tif")
+
+# Update CRS to EPSG:7856 (GDA2020 / MGA zone 56)
+human_footprint <- terra::project(human_footprint, "EPSG:7856")
+
+plot(human_footprint, main = "Human Footprint Index")
+
+human_footprint <- crop(human_footprint, SEQ_extent.vect) # Mask to SEQ extent
+human_footprint <- mask(human_footprint, SEQ_extent.vect) # Mask to SEQ extent
+plot(human_footprint, main = "Human Footprint Index masked to SEQ extent")
+
+```
+
+### Option 1. Narrow down potential covariates based on ecological knowledge
 
 For this example, we had advice from scientists at CSIRO (<link>) who conducted an expert elicitation to gather a set of potential covariates that are likely to be important for koalas. This is an example of one approach for deciding what covariates are candidates for inclusion in your model. We use this expert knowledge to filter out the key bioclim variables.
 
@@ -389,43 +401,52 @@ covs_current_expert <- subset(covs_current, names(covs_current) %in% c("BIO5_Max
                                                                        "BIO12_Annual_Precipitation",
                                                                        "BIO15_Precip_Seasonality"))
 
+# plot(human_footprint, main = "Human Footprint Index") # Plot human footprint layer)
+human_footprint_resampled <- resample(human_footprint, covs_current_expert, method = "bilinear")
+# plot(human_footprint_resampled, main = "Human Footprint Index Resampled")
+
+covs_current <- c(covs_current, human_footprint_resampled) # Add human footprint layer
+covs_current_expert <- c(covs_current_expert, human_footprint_resampled) # Add human footprint layer
+
 for(i in 1:nlyr(covs_current_expert)) {
-  plot(covs_current_expert[[i]], main = names(covs_current_expert)[[i]])
+  terra::plot(covs_current_expert[[i]], main = names(covs_current_expert)[[i]])
 }
 
 ```
+
+## Step 3. Data preparation for modelling
 
 ### Extract environmental covariate values from presence and background locations (training locations)
 
 This will create a dataframe where each row is a koala presence or background location and each column is a value for our four bioclimatic variables at that location.
 
-We use a function from `flexsdm` for this.
-
 ```{r}
 
-train_PB_covs <- sdm_extract(
-  data = pr_bg,
-  x = "x",
-  y = "y",
-  env_layer = covs_current_expert, # Raster with environmental variables
-  variables = NULL, # Vector with the variable names of predictor
-  filter_na = TRUE
-)
+train_PB_covs <- terra::extract(covs_current, pr_bg[,c("x", "y")], xy = T)
+train_PB_covs <- cbind(train_PB_covs, pr_bg["Presence"])
+
+# Remove rows where there's values missing from at least one covariate
+print(paste0("RECORDS FROM ", nrow(train_PB_covs) - sum(complete.cases(train_PB_covs)), " ROWS IN TRAINING DATA REMOVED DUE TO MISSING COVARIATE VALUES"))
+
+train_PB_covs <- train_PB_covs[complete.cases(train_PB_covs), ]
+train_PB_covs <- dplyr::select(train_PB_covs, -ID)
 
 head(train_PB_covs)
+
+train_PB_covs <- train_PB_covs %>% drop_na() # Remove any rows with NA values
 
 ```
 
 ## Thin the koala presence points (for tutorial only)
 
-We now thin the presences to reduce the number of points to a manageable size for plotting and modelling. *This is just for the purpose of this tutorial*, and is done here to make the tutorial run faster and to make the plots clearer. There are some reasons you would want to thin (such as bias correction), but you would want to carefully consider whether this is appropriate for your modelling.
+We now thin the presences to reduce the number of points to a manageable size for plotting and modelling. This is not a recommended step for real data, but is done here to make the tutorial run faster and to make the plots clearer.
 
 ```{r}
 
 train_PB_covs_pres <- train_PB_covs %>% filter(Presence == 1)
 train_PB_covs_bg <- train_PB_covs %>% filter(Presence == 0)
 
-# Thin the presences
+# Thin the presences for plotting
 train_PB_covs_pres_thin <- train_PB_covs_pres[sample(nrow(train_PB_covs_pres), 10000), ]
 
 # Combine back into both presence and background
@@ -433,7 +454,7 @@ train_PB_covs_thinned <- rbind(train_PB_covs_pres_thin, train_PB_covs_bg)
 
 ```
 
-## Check correlation and multicollinearity of covariates
+## Step 4. Check correlation and multicollinearity of covariates
 
 Although we've narrowed down our covariates already based on discussion with experts, there's a chance that our remaining variables might be correlated or collinear. This would cause issues with models, particularly because we're hoping to predict our model into the future. We're going to inspect our covariates for signs of correlation and multicolinearity.
 
@@ -443,7 +464,7 @@ There are several different methods for creating correlation plots, we just show
 
 ```{r}
 
-ecospat::ecospat.cor.plot(covs_current_expert)
+ecospat.cor.plot(covs_current_expert)
 
 ```
 
@@ -468,12 +489,11 @@ usdm::vifstep(covs_current_expert) # Variance Inflation Factor and test for mult
 
 ```
 
-# Step 4. Exploration of the koala presence and background data
+## Step 5. Exploration of the koala presence and background data
 
 It is good practice to assess where in the environmental space the presence and background points are located. This can help to identify if there are any potential issues with the data, such as a lack of background points in certain areas of environmental space. It's also a good way to have a first look at any patterns in the species data and the environmental covariates.
 
-::: {.panel-tabset}
-
+::: {.panel-tabset group="model"}
 ## Bio5 Max. temperature warmest month
 
 ```{r}
@@ -525,10 +545,9 @@ ggplot() +
     labs(title = "BIO15_Precip_Seasonality")
 
 ```
-
 :::
 
-# Step 5. Fit our first model: A generalised linear model (GLM)
+# First Model: GLM model fitting
 
 ```{r}
 
@@ -547,7 +566,7 @@ It is always helpful to create a null model as a benchmark to assess how the inc
 
 # Fit a null model with only the intercept
 null_model <- glm(Presence ~ 1,
-                  data = train_PB_covs_thinned,
+                  data = train_PB_covs,
                   family = binomial(link = "logit"))
 
 # Check the model results
@@ -555,10 +574,7 @@ summary(null_model)
 
 ```
 
-## GLM Model 1 - expert variables with linear terms
-
-In this model, we include linear terms for the covariates. You can also do things like add quadratic terms to account for non-linear relationships between the predictors and the response variable. This increases the complexity of the model and allows for more flexibility in fitting the data.
-
+## GLM Model 1 - expert variables
 
 ```{r}
 
@@ -573,6 +589,59 @@ glm_model_1 <- glm(Presence ~
 # Check the model results
 summary(glm_model_1)
 
+# These response curves don't look very helpful
+dismo::response(glm_model_1)
+
+```
+
+### with bias covariate
+
+```{r}
+
+glm_model_1_bias <- glm(Presence ~
+                     BIO5_Max_Temp_Warmest_Month +
+                     BIO6_Min_Temp_Coldest_Month +
+                     BIO12_Annual_Precipitation +
+                     BIO15_Precip_Seasonality +
+                     cost_hfp2013,
+                   data=train_PB_covs_thinned,
+                   family = binomial(link = "logit"))
+
+# Check the model results
+summary(glm_model_1_bias)
+
+# These response curves don't look very helpful
+dismo::response(glm_model_1_bias)
+
+```
+
+```{r}
+
+layerCor(covs_current_expert, fun = "pearson")
+
+```
+
+
+## GLM Model 2 - expert variables with quadratics
+
+In this model, we include quadratic terms for the covariates. This is a common approach in species distribution modelling to account for non-linear relationships between the predictors and the response variable. This increases the complexity of the model and allows for more flexibility in fitting the data.
+
+```{r}
+
+glm_model_2 <- glm(Presence ~
+                     BIO5_Max_Temp_Warmest_Month + I(BIO5_Max_Temp_Warmest_Month^2) +
+                     BIO6_Min_Temp_Coldest_Month + I(BIO6_Min_Temp_Coldest_Month^2) +
+                     BIO12_Annual_Precipitation + I(BIO12_Annual_Precipitation^2) +
+                     BIO15_Precip_Seasonality + I(BIO15_Precip_Seasonality^2),
+                   data=train_PB_covs_thinned,
+                   family = binomial(link = "logit"))
+
+# Check the model results
+summary(glm_model_2)
+
+# These response curves don't look very helpful
+dismo::response(glm_model_2)
+
 ```
 
 ## Model effect evaluation
@@ -580,7 +649,6 @@ summary(glm_model_1)
 Here we use a function presented in an EcoCommons Australia notebook to evaluate the model performance. The notebook can be found on their GitHub: https://github.com/EcoCommonsAustralia/notebooks/tree/main/notebooks.
 
 ```{r}
-#| code-fold: true
 
 # Function to plot effect size graph
 plot_effect_size <- function(glm_model) {
@@ -614,19 +682,25 @@ plot_effect_size <- function(glm_model) {
     theme_minimal()
 }
 
+```
+
+## Use the function to check the effect sizes
+
+We need to be careful when interpreting the effect sizes of models with quadratic terms however, as the response curve depends on the linear and the quadratic term.
+
+```{r}
 
 # Example usage of effect size plot
 plot_effect_size(glm_model_1)
+plot_effect_size(glm_model_2)
 
 ```
 
 ## Response curves
 
-Again, we can use a function from the EcoCommons notebook to plot the response curves from the model. 
+Again, we can use a function from the EcoCommons notebook to plot the response curves from the model, although for quadratics we need to adjust the function or use something else.
 
 ```{r}
-
-#| code-fold: true
 
 plot_species_response <- function(glm_model, predictors, data) {
   # Check if required libraries are installed
@@ -697,37 +771,94 @@ plot_species_response <- function(glm_model, predictors, data) {
   )
 }
 
-# Use the response curve function
+```
+
+## Use the response curve function
+
+```{r}
 
 predictors <- c("BIO5_Max_Temp_Warmest_Month",
                 "BIO6_Min_Temp_Coldest_Month",
                 "BIO12_Annual_Precipitation",
-                "BIO15_Precip_Seasonality")
+                "BIO15_Precip_Seasonality",
+                "cost_hfp2013")
 
 plot_species_response(glm_model_1, predictors, train_PB_covs_thinned)
 
 ```
 
+### Model 1 partial responses
 
+```{r}
 
+# Plot the partial responses
+partial_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors], main='GLM')
 
+# Plot inflated response curves:
+inflated_response(glm_model_1, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='GLM')
 
+```
 
-### TIDY FROM HERE ###
+### Model 2 partial responses
 
+```{r}
 
+# Plot the partial responses
+partial_response(glm_model_2, predictors = train_PB_covs_thinned[,predictors], main='GLM')
 
+# Plot inflated response curves:
+inflated_response(glm_model_2, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='GLM')
 
-
+```
 
 ## GLM predictions to current environment
 
-### Model 1
+### Model 1 - without the bias correction
+
+```{r}
+
+covs_current_expert_noHF <- terra::subset(covs_current_expert, "cost_hfp2013", negate=TRUE)
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_model_1 <- predicts::predict(covs_current_expert_noHF, glm_model_1, type = "response")
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_model_1,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Relative Probability of Occurrence of Koalas in SEQ - GLM 1"
+)
+
+```
+
+### Model 1 - with the bias correction
 
 ```{r}
 
 # Predict the presence probability across the entire raster extent
-predicted_raster_model_1 <- predicts::predict(covs_current_expert, glm_model_1, type = "response")
+predicted_raster_model_1 <- predicts::predict(covs_current_expert, glm_model_1_bias, type = "response")
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_model_1,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Relative Probability of Occurrence of Koalas in SEQ - GLM 1"
+)
+
+```
+
+```{r}
+
+human_footprint_mean <- human_footprint_resampled
+values(human_footprint_mean) <- mean(values(human_footprint_resampled), na.rm = TRUE)
+
+covs_current_expert_HFmean <- terra::subset(covs_current_expert, "cost_hfp2013", negate=TRUE)
+
+# Add the human footprint layer with mean values to the covariates
+covs_current_expert_HFmean <- c(covs_current_expert_HFmean, human_footprint_mean)
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_model_1 <- predicts::predict(covs_current_expert_HFmean, glm_model_1_bias, type = "response")
 
 # Plot the species distribution raster
 plot(
@@ -739,7 +870,23 @@ plot(
 ```
 
 
-# Step 6. Fit our second model: A random forest
+### Model 2
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_model_2 <- predicts::predict(covs_current_expert, glm_model_2, type = "response")
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_model_2,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Relative Probability of Occurrence of Koalas in SEQ - GLM 2"
+)
+
+```
+
+# Random forest
 
 ```{r}
 
@@ -818,6 +965,14 @@ model_formula <- as.formula(Presence ~
                               BIO12_Annual_Precipitation +
                               BIO15_Precip_Seasonality)
 
+# Specify the model formula - regression
+model_formula_bias <- as.formula(Presence ~
+                                   BIO5_Max_Temp_Warmest_Month +
+                                   BIO6_Min_Temp_Coldest_Month +
+                                   BIO12_Annual_Precipitation +
+                                   BIO15_Precip_Seasonality +
+                                   cost_hfp2013)
+
 ```
 
 ### Fit the random forest model
@@ -866,12 +1021,74 @@ inflated_response(rf_1, predictors = train_PB_covs_thinned[,predictors], method 
 
 ```
 
+### With the bias layer
+
+```{r}
+
+rf_1_bias <- randomForest::randomForest(formula = model_formula_bias,
+                                   data = train_PB_covs_thinned,
+                                   weights = weight,
+                                   ntree = 1000,
+                                   sampsize = sample_size,
+                                   replace = T,
+                                   importance=TRUE)
+
+```
+
+### Check the model results
+
+```{r}
+
+# Model summary
+rf_1_bias
+
+# Variable importance:
+importance(rf_1_bias)
+
+# Plot variable importance
+varImpPlot(rf_1_bias, type = 1)
+
+# Look at single trees:
+head(getTree(rf_1_bias,1,T))
+
+```
+
+### Partial dependence plots
+
+```{r}
+
+# Now, we plot response curves in the same way as we did for GLMs above:
+partial_response(rf_1_bias, predictors = train_PB_covs_thinned[,predictors], main='Random Forest')
+
+# Plot inflated response curves:
+inflated_response(rf_1_bias, predictors = train_PB_covs_thinned[,predictors], method = "stat3", lwd = 3, main='Random Forest')
+
+```
+
 ### Random Forest predictions
+
+Without bias correction
 
 ```{r}
 
 # Predict the presence probability across the entire raster extent
-predicted_raster_RF_1 <- predicts::predict(covs_current_expert, rf_1, type = "response")
+predicted_raster_RF_1 <- predicts::predict(covs_current_expert_noHF, rf_1, type = "response")
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_RF_1,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Relative Probability of Occurrence of Koalas in SEQ - RF 1"
+)
+
+```
+
+With bias correction
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_RF_1 <- predicts::predict(covs_current_expert_HFmean, rf_1_bias, type = "response")
 
 # Plot the species distribution raster
 plot(
@@ -1063,16 +1280,20 @@ eval_df.RF %>%
 
 ```{r}
 
-covs_future <- rast("Data/Environmental_variables/future_bioclim.2090.SSP370.tif")
+covs_future <- rast("Data/Environmental_variables/SEQ_future_bioclim.2090.SSP370.tif")
 names(covs_future) <- layer_names
 covs_future
 
-covs_future <- terra::mask(covs_future, covs_current) # Crop to SEQ extent
+covs_future <- terra::mask(covs_future, covs_current[[1]]) # Crop to SEQ extent
 
 covs_future_expert <- subset(covs_future, names(covs_future) %in% c("BIO5_Max_Temp_Warmest_Month",
                                                                     "BIO6_Min_Temp_Coldest_Month",
                                                                     "BIO12_Annual_Precipitation",
                                                                     "BIO15_Precip_Seasonality"))
+
+# Add the human footprint layer with mean values to the covariates
+covs_future_expert_HFmean <- c(covs_future_expert, human_footprint_mean)
+covs_future_expert_HFmean
 
 ```
 
@@ -1085,8 +1306,9 @@ for(i in 1:nlyr(covs_future)) {
 }
 
 # Plot to compare the difference between the current and future rasters
+covs_current_expert_noHF <- terra::subset(covs_current_expert, "cost_hfp2013", negate=TRUE)
 
-plot(covs_future_expert - covs_current_expert)
+plot(covs_future_expert - covs_current_expert_noHF)
 
 ```
 
@@ -1152,13 +1374,13 @@ plot(
 ```{r}
 
 # Predict the presence probability across the entire raster extent
-predicted_raster_model_2 <- predict(covs_future_expert, glm_model_2, type = "response")
+predicted_raster_model_2 <- predict(covs_future_expert_HFmean, glm_model_1_bias, type = "response")
 
 # Plot the species distribution raster
 plot(
   predicted_raster_model_2,
   range = c(0, 1),  # Set min and max values for the color scale
-  main = "Relative Probability of Occurrence of Koalas in SEQ - GLM2"
+  main = "Relative Probability of Occurrence of Koalas in SEQ - GLM1"
 )
 
 ```
@@ -1171,6 +1393,22 @@ plot(
 
 # Predict the presence probability across the entire raster extent
 predicted_raster_RF_1 <- predicts::predict(covs_future_expert, rf_1, type = "response", na.rm=TRUE)
+
+# Plot the species distribution raster
+plot(
+  predicted_raster_RF_1,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Relative Probability of Occurrence of Koalas in SEQ - RF"
+)
+
+```
+
+### Model with bias correction
+
+```{r}
+
+# Predict the presence probability across the entire raster extent
+predicted_raster_RF_1 <- predicts::predict(covs_future_expert_HFmean, rf_1_bias, type = "response", na.rm=TRUE)
 
 # Plot the species distribution raster
 plot(
