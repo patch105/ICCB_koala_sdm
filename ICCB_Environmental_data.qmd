@@ -30,6 +30,8 @@ abstract: |
 ## Import packages
 
 ```{r}
+#| warning: false
+#| message: false
 
 library(terra)
 library(dplyr)
