@@ -903,8 +903,19 @@ predicted_current <- predicts::predict(covs_current_expert_constHF_scaled, glm_m
 plot(
   predicted_current,
   range = c(0, 1),  # Set min and max values for the color scale
-  main = "Climatic Suitability of Koalas in SEQ"
+  main = "Climatic Suitability of Koalas in SEQ - Current"
 )
+
+# Save the plot as a png
+png(filename="Outputs/GLM_outputs/predicted_current.png",
+    width = 150, height = 130, units = "mm", res = 600)
+plot(predicted_current,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Climatic Suitability of Koalas in SEQ - Current")
+dev.off()
+
+# Write the raster to file
+writeRaster(predicted_current, "Outputs/GLM_outputs/predicted_current.tif", overwrite = TRUE)
 
 ```
 
@@ -1115,8 +1126,19 @@ predicted_future370 <- predict(covs_future_SSP370_expert_HF_scaled, glm_model, t
 plot(
   predicted_future370,
   range = c(0, 1),  # Set min and max values for the color scale
-  main = "Future Climatic Suitability of Koalas in SEQ - SSP370"
+  main = "Climatic Suitability of Koalas - Future(SSP370)"
 )
+
+# Save the plot as a png
+png(filename="Outputs/GLM_outputs/predicted_future370.png",
+    width = 150, height = 130, units = "mm", res = 600)
+plot(predicted_future370,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Climatic Suitability of Koalas - Future(SSP370)")
+dev.off()
+
+# Write the raster to file
+writeRaster(predicted_future370, "Outputs/GLM_outputs/predicted_future370.tif", overwrite = TRUE)
 
 ```
 
@@ -1160,6 +1182,19 @@ plot(predicted_future370 - predicted_current,
      main = "Future (SSP370) - Current Predictions ",
      col = cols,
      range = c(-1, 1))
+
+# Save the plot as a png
+png(filename="Outputs/GLM_outputs/future370-current.png",
+    width = 150, height = 130, units = "mm", res = 600)
+plot(predicted_future370 - predicted_current,
+     main = "Future (SSP370) - Current Predictions ",
+     col = cols,
+     range = c(-1, 1))
+dev.off()
+
+# Write the raster to file
+writeRaster(predicted_future370 - predicted_current, 
+            "Outputs/GLM_outputs/future370-current.tif", overwrite = TRUE)
 
 ```
 
@@ -1213,6 +1248,24 @@ covs_future_SSP126_expert_HF_scaled <- c(covs_future_SSP126_expert_scaled, const
 # Predict the presence probability across the entire raster extent
 predicted_future126 <- predict(covs_future_SSP126_expert_HF_scaled, glm_model, type = "response")
 
+# Plot the species distribution raster
+plot(
+  predicted_future126,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Climatic Suitability of Koalas - Future(SSP126)"
+)
+
+# Save the plot as a png
+png(filename="Outputs/GLM_outputs/predicted_future126.png",
+    width = 150, height = 130, units = "mm", res = 600)
+plot(predicted_future126,
+  range = c(0, 1),  # Set min and max values for the color scale
+  main = "Climatic Suitability of Koalas - Future(SSP126)")
+dev.off()
+
+# Write the raster to file
+writeRaster(predicted_future370, "Outputs/GLM_outputs/predicted_future126.tif", overwrite = TRUE)
+
 ```
 
 ## Plot the different between current and future (SSP126)
@@ -1232,9 +1285,22 @@ cols <- colorRampPalette(c("red", "white", "blue"))(100)
 
 
 plot(predicted_future126 - predicted_current,
-     main = "Future (SSP370) - Current Predictions ",
+     main = "Future (SSP126) - Current Predictions ",
      col = cols,
      range = c(-1, 1))
+
+# Save the plot as a png
+png(filename="Outputs/GLM_outputs/future126-current.png",
+    width = 150, height = 130, units = "mm", res = 600)
+plot(predicted_future126 - predicted_current,
+     main = "Future (SSP126) - Current Predictions ",
+     col = cols,
+     range = c(-1, 1))
+dev.off()
+
+# Write the raster to file
+writeRaster(predicted_future126 - predicted_current, 
+            "Outputs/GLM_outputs/future126-current.tif", overwrite = TRUE)
 
 ```
 
@@ -1279,6 +1345,19 @@ plot(predicted_future370 - predicted_future126,
      main = "Future (SSP370) - Future (SSP126) Predictions ",
      col = cols,
      range = c(-1, 1))
+
+# Save the plot as a png
+png(filename="Outputs/GLM_outputs/future370-future126.png",
+    width = 150, height = 130, units = "mm", res = 600)
+plot(predicted_future370 - predicted_future126,
+     main = "Future (SSP370) - Future (SSP126) Predictions ",
+     col = cols,
+     range = c(-1, 1))
+dev.off()
+
+# Write the raster to file
+writeRaster(predicted_future370 - predicted_future126, 
+            "Outputs/GLM_outputs/future370-future126.tif", overwrite = TRUE)
 
 ```
 
